@@ -1,0 +1,39 @@
+name: tag-on-main-merge
+
+on:
+  pull_request_target:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Create release tag
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          tag="v$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}"
+          target_sha="${MERGE_SHA:-$(git rev-parse origin/main)}"
+
+          if git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists; skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" "$target_sha" -m "Release $tag"
+          git push origin "$tag"
+
+      - name: Show created tag
+        run: git tag --points-at HEAD

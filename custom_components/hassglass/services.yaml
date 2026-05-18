@@ -43,7 +43,7 @@ notify:
 
 dismiss:
   name: Dismiss HUD card
-  description: Remove a HUD card by id, or all cards with `card_id: "*"`.
+  description: 'Remove a HUD card by id, or all cards with `card_id: "*"`.'
   fields:
     device_id:
       required: true

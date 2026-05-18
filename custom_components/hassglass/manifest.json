@@ -1,15 +1,28 @@
 {
-  "domain": "hassglass",
-  "name": "HassGlass",
-  "version": "0.0.0",
-  "documentation": "https://github.com/teaganglenn/HassGlass",
-  "issue_tracker": "https://github.com/teaganglenn/HassGlass/issues",
-  "codeowners": ["@teaganglenn"],
-  "config_flow": true,
-  "iot_class": "local_push",
-  "integration_type": "hub",
-  "dependencies": ["http"],
-  "after_dependencies": ["assist_pipeline", "tts", "stt", "media_player", "media_source", "zeroconf"],
-  "zeroconf": ["_hassglass._tcp.local."],
-  "requirements": []
+    "domain": "hassglass",
+    "name": "HassGlass",
+    "after_dependencies": [
+        "assist_pipeline",
+        "tts",
+        "stt",
+        "media_player",
+        "media_source",
+        "zeroconf"
+    ],
+    "codeowners": [
+        "@constructorfleet"
+    ],
+    "config_flow": true,
+    "dependencies": [
+        "http"
+    ],
+    "documentation": "https://github.com/constructorfleet/HassGlass",
+    "integration_type": "hub",
+    "iot_class": "local_push",
+    "issue_tracker": "https://github.com/constructorfleet/HassGlass/issues",
+    "requirements": [],
+    "version": "0.0.0",
+    "zeroconf": [
+        "_hassglass._tcp.local."
+    ]
 }

@@ -1,5 +1,8 @@
 # HassGlass
 
+[![Open your Home Assistant instance and add this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=constructorfleet&repository=hassglass)
+[![Open your Home Assistant instance and start setting up HassGlass.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=hassglass)
+
 A Home Assistant HACS-installable custom integration that turns **Rokid AR Glasses** into a first-class voice + visual satellite for the Home Assistant **Assist** pipeline.
 
 HassGlass is to head-worn AR glasses what [View Assist](https://github.com/dinki/view_assist_integration) is to tablets and ESPHome devices: it bridges Assist (speech-to-text, intent recognition, conversation, text-to-speech) with the device's native I/O — microphones, speaker, single-eye micro-LED display, IMU, and touch/button input — without depending on the vendor cloud.
@@ -30,13 +33,13 @@ HassGlass is to head-worn AR glasses what [View Assist](https://github.com/dinki
 
 If you already run View Assist, the mental model is identical — HassGlass just swaps the visual surface from a tablet dashboard to a HUD overlay and adds glasses-specific input (gestures, head pose).
 
-## Installation (planned)
+## Installation
 
-1. In HACS, add this repo as a custom repository (`Integration` category).
+1. Add this repo in HACS with the button above, or directly via [my.home-assistant.io](https://my.home-assistant.io/redirect/hacs_repository/?owner=constructorfleet&repository=hassglass).
 2. Install **HassGlass** from HACS and restart Home Assistant.
 3. Sideload the **HassGlass Glass Agent** APK onto the glasses (built from `apps/glass_agent/`, see [docs/ROKID_TRANSPORT.md](docs/ARCHITECTURE.md#rokid-transport-layer)).
 4. Optional: install **HassGlass Companion** on your iPhone for first-time pairing and BLE fallback.
-5. In HA, *Settings → Devices & Services → Add Integration → HassGlass* and follow the discovery flow.
+5. Start the integration flow with the button above, or directly via [my.home-assistant.io](https://my.home-assistant.io/redirect/config_flow_start/?domain=hassglass), then follow the discovery flow in Home Assistant.
 
 ## Documentation
 
