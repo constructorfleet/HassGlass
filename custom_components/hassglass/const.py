@@ -29,6 +29,8 @@ DEFAULT_PAIRING_TIMEOUT_S: Final = 120
 
 SIGNAL_DEVICE_UPDATED: Final = f"{DOMAIN}_device_updated"
 SIGNAL_DEVICE_REMOVED: Final = f"{DOMAIN}_device_removed"
+SIGNAL_INPUT_GESTURE: Final = f"{DOMAIN}_input_gesture"
+SIGNAL_INPUT_BUTTON: Final = f"{DOMAIN}_input_button"
 
 EVENT_GESTURE: Final = f"{DOMAIN}_gesture"
 EVENT_BUTTON: Final = f"{DOMAIN}_button"

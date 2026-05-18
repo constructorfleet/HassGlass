@@ -19,7 +19,14 @@ from homeassistant.helpers.http import HomeAssistantView
 
 from .audio import run_assist_pipeline
 from .auth import find_device_by_token
-from .const import SIGNAL_DEVICE_UPDATED, WS_URL_PATH
+from .const import (
+    EVENT_BUTTON,
+    EVENT_GESTURE,
+    SIGNAL_DEVICE_UPDATED,
+    SIGNAL_INPUT_BUTTON,
+    SIGNAL_INPUT_GESTURE,
+    WS_URL_PATH,
+)
 from .device import DeviceBus, GlassesRuntime, IncomingFrame
 from .protocol import (
     MessageType,
@@ -175,8 +182,42 @@ async def _handle_text(
                 wake_word_phrase=_wake_word_phrase(decoded.data),
             )
         )
+    elif decoded.type is MessageType.INPUT_GESTURE:
+        _emit_input(
+            hub,
+            runtime.record.device_id,
+            SIGNAL_INPUT_GESTURE,
+            EVENT_GESTURE,
+            decoded.data,
+        )
+    elif decoded.type is MessageType.INPUT_BUTTON:
+        _emit_input(
+            hub,
+            runtime.record.device_id,
+            SIGNAL_INPUT_BUTTON,
+            EVENT_BUTTON,
+            decoded.data,
+        )
 
     bus.publish(IncomingFrame(message=decoded))
+
+
+def _emit_input(
+    hub: HassGlassHub,
+    device_id: str,
+    signal: str,
+    bus_event: str,
+    payload: dict[str, object],
+) -> None:
+    """Fan an input.* frame out to entities (via signal) and the HA event bus.
+
+    Two channels because some user automations key off the HA bus event
+    name (cleaner for `event` triggers) while the EventEntity needs the
+    per-device dispatcher signal to update without polling.
+    """
+    dispatch_payload = {"device_id": device_id, **payload}
+    async_dispatcher_send(hub.hass, signal, device_id, payload)
+    hub.hass.bus.async_fire(bus_event, dispatch_payload)
 
 
 def _wake_word_phrase(data: dict[str, object]) -> str | None:
