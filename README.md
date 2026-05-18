@@ -1,6 +1,6 @@
 # HassGlass
 
-[![Open your Home Assistant instance and add this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=constructorfleet&repository=hassglass)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=constructorfleet&repository=hassglass&category=integration)
 [![Open your Home Assistant instance and start setting up HassGlass.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=hassglass)
 
 A Home Assistant HACS-installable custom integration that turns **Rokid AR Glasses** into a first-class voice + visual satellite for the Home Assistant **Assist** pipeline.
