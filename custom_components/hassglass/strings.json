@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HassGlass",
+        "description": "Choose defaults for all paired glasses. You can pair devices after setup from the integration's Devices page.",
+        "data": {
+          "pipeline_id": "Default Assist pipeline ID (blank = use HA preferred)",
+          "wake_word_enabled": "Enable on-glass wake word by default",
+          "default_ttl_ms": "Default HUD card lifetime (milliseconds)",
+          "fallback_media_player": "Fallback media_player entity ID for announcements"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "HassGlass is already set up. Only one hub per Home Assistant installation is supported."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HassGlass defaults",
+        "data": {
+          "pipeline_id": "Default Assist pipeline ID",
+          "wake_word_enabled": "Enable on-glass wake word by default",
+          "default_ttl_ms": "Default HUD card lifetime (milliseconds)",
+          "fallback_media_player": "Fallback media_player entity ID"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": { "name": "Battery" },
+      "signal": { "name": "Wi-Fi signal" },
+      "last_intent": { "name": "Last intent" },
+      "current_card": { "name": "Current HUD card" }
+    },
+    "binary_sensor": {
+      "worn": { "name": "Worn" },
+      "listening": { "name": "Listening" },
+      "connected": { "name": "Connected" }
+    }
+  }
+}
