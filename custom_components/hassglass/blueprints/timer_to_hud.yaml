@@ -1,0 +1,55 @@
+blueprint:
+  name: HassGlass — timer to HUD
+  description: >-
+    Mirror a Home Assistant timer onto the glasses HUD with a live
+    countdown. Re-runs on every timer state change so finish, cancel,
+    and restart all reflect on the HUD.
+  domain: automation
+  source_url: https://github.com/teaganglenn/HassGlass/blob/main/custom_components/hassglass/blueprints/timer_to_hud.yaml
+  input:
+    timer_entity:
+      name: Timer entity
+      selector:
+        entity:
+          domain: timer
+    glasses_device_id:
+      name: HassGlass device_id
+      selector:
+        text:
+    label:
+      name: Card label
+      description: Shown as the timer label on the HUD.
+      default: "Timer"
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input timer_entity
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state == 'active' }}"
+        sequence:
+          - action: hassglass.notify
+            data:
+              device_id: !input glasses_device_id
+              card_id: timer
+              priority: 60
+              card:
+                kind: timer
+                label: !input label
+                expires_at: "{{ trigger.to_state.attributes.finishes_at }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state in ('idle', 'paused') }}"
+        sequence:
+          - action: hassglass.dismiss
+            data:
+              device_id: !input glasses_device_id
+              card_id: timer
+
+mode: queued
+max: 5

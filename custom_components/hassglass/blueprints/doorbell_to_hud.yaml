@@ -1,0 +1,53 @@
+blueprint:
+  name: HassGlass — doorbell to HUD
+  description: >-
+    When a doorbell sensor triggers, push a priority-90 alert card to the
+    chosen glasses. Optionally pre-empts whatever else is on the HUD.
+  domain: automation
+  source_url: https://github.com/teaganglenn/HassGlass/blob/main/custom_components/hassglass/blueprints/doorbell_to_hud.yaml
+  input:
+    doorbell_entity:
+      name: Doorbell sensor
+      description: A binary sensor that turns on when the doorbell is pressed.
+      selector:
+        entity:
+          domain: binary_sensor
+    glasses_device_id:
+      name: HassGlass device_id
+      description: From the integration's Devices page.
+      selector:
+        text:
+    door_label:
+      name: Door label
+      description: Shown as the card body. e.g. "Front door".
+      default: "Front door"
+      selector:
+        text:
+    ttl_ms:
+      name: How long to show
+      description: Milliseconds the card stays on the HUD.
+      default: 12000
+      selector:
+        number:
+          min: 2000
+          max: 60000
+          unit_of_measurement: ms
+
+trigger:
+  - platform: state
+    entity_id: !input doorbell_entity
+    to: "on"
+
+action:
+  - action: hassglass.notify
+    data:
+      device_id: !input glasses_device_id
+      card_id: doorbell
+      priority: 90
+      ttl_ms: !input ttl_ms
+      card:
+        kind: alert
+        title: Doorbell
+        body: !input door_label
+
+mode: single

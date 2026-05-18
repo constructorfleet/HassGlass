@@ -1,0 +1,54 @@
+blueprint:
+  name: HassGlass — alarm panel to HUD
+  description: >-
+    Mirror an alarm_control_panel onto the glasses HUD as a priority alert
+    whenever it's triggered, and a quiet status toast when it transitions
+    to armed_home / armed_away / disarmed.
+  domain: automation
+  source_url: https://github.com/teaganglenn/HassGlass/blob/main/custom_components/hassglass/blueprints/alarm_to_hud.yaml
+  input:
+    alarm_entity:
+      name: Alarm panel
+      selector:
+        entity:
+          domain: alarm_control_panel
+    glasses_device_id:
+      name: HassGlass device_id
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input alarm_entity
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state == 'triggered' }}"
+        sequence:
+          - action: hassglass.notify
+            data:
+              device_id: !input glasses_device_id
+              card_id: alarm
+              priority: 100
+              card:
+                kind: alert
+                title: Alarm
+                body: "Triggered — last by {{ trigger.to_state.attributes.changed_by or 'unknown' }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state in ('armed_home','armed_away','armed_night','disarmed') }}"
+        sequence:
+          - action: hassglass.notify
+            data:
+              device_id: !input glasses_device_id
+              card_id: alarm-status
+              priority: 30
+              ttl_ms: 4000
+              card:
+                kind: toast
+                text: "Alarm: {{ trigger.to_state.state | replace('_', ' ') }}"
+
+mode: queued
+max: 5

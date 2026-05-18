@@ -1,0 +1,52 @@
+blueprint:
+  name: HassGlass — motion alert to HUD
+  description: >-
+    Fire an "Motion: <area>" toast to the wearer's glasses when a motion
+    sensor goes off — useful for keeping an eye on outside cameras while
+    you're moving around the house.
+  domain: automation
+  source_url: https://github.com/teaganglenn/HassGlass/blob/main/custom_components/hassglass/blueprints/motion_to_hud.yaml
+  input:
+    motion_entities:
+      name: Motion sensors
+      description: One or more binary_sensors with device_class motion / occupancy.
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+    glasses_device_id:
+      name: HassGlass device_id
+      selector:
+        text:
+    min_seconds_between:
+      name: Throttle (seconds)
+      description: Minimum seconds between repeated notifications per sensor.
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 600
+          unit_of_measurement: s
+
+trigger:
+  - platform: state
+    entity_id: !input motion_entities
+    to: "on"
+
+action:
+  - alias: Throttle repeats per sensor
+    delay:
+      seconds: !input min_seconds_between
+  - action: hassglass.notify
+    data:
+      device_id: !input glasses_device_id
+      card_id: "motion-{{ trigger.entity_id }}"
+      priority: 70
+      ttl_ms: 6000
+      card:
+        kind: toast
+        text: "Motion: {{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
+        severity: warning
+
+mode: queued
+max: 10
