@@ -1,0 +1,42 @@
+name: android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/glass_agent/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "apps/glass_agent/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - ".github/workflows/android.yml"
+
+jobs:
+  glass-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Test Glass Agent
+        run: gradle :apps:glass_agent:testDebugUnitTest
+
+      - name: Assemble Glass Agent
+        run: gradle :apps:glass_agent:assembleDebug
