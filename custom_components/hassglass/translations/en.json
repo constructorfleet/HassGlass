@@ -58,6 +58,9 @@
     "event": {
       "gesture": { "name": "Touchpad gesture" },
       "button": { "name": "Side button" }
+    },
+    "notify": {
+      "notify": { "name": "HUD notification" }
     }
   },
   "services": {
