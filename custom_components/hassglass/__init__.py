@@ -41,6 +41,7 @@ class HassGlassRuntimeData:
     hud: HudDispatcher
     bridge: PipelineBridge
     tts_relay: TtsRelay
+    options_snapshot: dict[str, object]
 
 
 type HassGlassConfigEntry = ConfigEntry[HassGlassRuntimeData]
@@ -60,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) ->
         hud=hud,
         bridge=bridge,
         tts_relay=tts_relay,
+        options_snapshot=dict(entry.options),
     )
 
     hass.http.register_view(HassGlassWsView(hass, hub, bridge))
@@ -67,6 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) ->
     async_register_services(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     _LOGGER.info("HassGlass set up with %d paired device(s)", len(hub.devices))
     return True
@@ -80,3 +83,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) -
         # Singleton integration — services are owned by the (only) entry.
         async_unregister_services(hass)
     return unloaded
+
+
+async def _async_update_listener(
+    hass: HomeAssistant,
+    entry: HassGlassConfigEntry,
+) -> None:
+    """Reload the integration when *options* change, not when entry.data does.
+
+    Device records persist via a Store (M4 refactor) so `entry.data` only
+    holds init markers. The remaining triggers for this listener are options-
+    flow submissions (master defaults) and the one-time legacy-data migration
+    in `HassGlassHub.async_load`. We compare against the snapshot captured at
+    setup and skip reloading if options didn't actually change — so the
+    migration write doesn't cause a spurious reload, and toggling a service
+    call that briefly updates `entry.options` to the same value is also a
+    no-op.
+    """
+    snapshot = entry.runtime_data.options_snapshot
+    if dict(entry.options) == snapshot:
+        return
+    _LOGGER.info("HassGlass options changed; reloading entry")
+    await hass.config_entries.async_reload(entry.entry_id)
