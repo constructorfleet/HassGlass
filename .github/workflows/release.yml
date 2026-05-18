@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   publish:
@@ -25,13 +26,36 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
-          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           if [ "$EVENT_NAME" = "push" ]; then
             tag="$REF_NAME"
           else
-            git fetch --force --tags origin
-            tag="$(git tag --points-at "$WORKFLOW_SHA" | sort -r | head -n 1)"
+            tag=""
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download release tag artifact
+        if: github.event_name == 'workflow_run'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          run_id: ${{ github.event.workflow_run.id }}
+          name: release-tag
+
+      - name: Finalize release tag
+        id: finalize_tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RESOLVED_TAG: ${{ steps.resolve_tag.outputs.tag }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            tag="$RESOLVED_TAG"
+          elif [ -f release-tag.txt ]; then
+            tag="$(cat release-tag.txt)"
+          else
+            tag=""
           fi
 
           if [ -z "$tag" ]; then
@@ -44,9 +68,9 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
-        if: steps.resolve_tag.outputs.skip != 'true'
+        if: steps.finalize_tag.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.resolve_tag.outputs.tag }}
+          tag_name: ${{ steps.finalize_tag.outputs.tag }}
           generate_release_notes: true
           make_latest: true
