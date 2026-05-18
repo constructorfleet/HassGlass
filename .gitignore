@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Android / Gradle
+.gradle/
+build/
+apps/**/build/
+apps/**/.gradle/
+local.properties
+apps/**/local.properties
+*.apk
+*.aab
+*.keystore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# HA dev sandbox
+config/
+.storage/
+home-assistant.log*
