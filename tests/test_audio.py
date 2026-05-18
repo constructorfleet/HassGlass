@@ -114,3 +114,33 @@ async def test_run_assist_pipeline_feeds_mic_stream_and_routes_events(
     assert kwargs["device_id"] == "rokid-1"
     assert kwargs["stt_metadata"].language == "en"
     bridge.handle_event.assert_awaited_once()
+
+
+async def test_run_assist_pipeline_refuses_when_listening_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ListeningEnabledSwitch=off cuts the mic at the integration boundary.
+
+    audio.start arrives, run_assist_pipeline gets called, but it must NOT
+    invoke async_pipeline_from_audio_stream — that's the whole point of the
+    mic-privacy toggle.
+    """
+    record = DeviceRecord(
+        device_id="rokid-1",
+        serial="SN",
+        firmware="fw",
+        agent_version="0.1.0",
+        token="t",
+        name="Test Glasses",
+        listening_enabled=False,
+    )
+    runtime = MagicMock(spec=GlassesRuntime, record=record)
+
+    pipeline_call = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.hassglass.audio.async_pipeline_from_audio_stream",
+        pipeline_call,
+    )
+
+    await run_assist_pipeline(MagicMock(), MagicMock(), MagicMock(), runtime)
+    pipeline_call.assert_not_awaited()

@@ -47,6 +47,13 @@
     },
     "select": {
       "pipeline": { "name": "Assist pipeline" }
+    },
+    "switch": {
+      "wake_word": { "name": "On-glass wake word" },
+      "listening_enabled": { "name": "Microphone enabled" }
+    },
+    "media_player": {
+      "media_player": { "name": "Glasses speaker" }
     }
   },
   "services": {

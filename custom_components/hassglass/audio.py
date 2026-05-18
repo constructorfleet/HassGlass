@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,8 @@ from homeassistant.core import Context
 from .const import CONF_PIPELINE_ID
 from .device import DeviceBus, IncomingFrame
 from .protocol import AudioChannel, MessageType
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -60,8 +63,23 @@ async def run_assist_pipeline(
     *,
     wake_word_phrase: str | None = None,
 ) -> None:
-    """Feed one glasses mic stream into Home Assistant's Assist pipeline."""
+    """Feed one glasses mic stream into Home Assistant's Assist pipeline.
+
+    Refuses to start a pipeline run when the device's mic-privacy toggle
+    (`listening_enabled`) is False, dropping the audio.start at the
+    integration boundary rather than the Glass Agent. Mic frames still
+    arrive at the WS reader but they're discarded with the device bus
+    when no MicAudioStream subscribes.
+    """
     device_id = runtime.record.device_id
+
+    if not runtime.record.listening_enabled:
+        _LOGGER.info(
+            "ignoring audio.start for %s — listening_enabled is False",
+            device_id,
+        )
+        return
+
     options = hub.resolved_options_for(device_id)
     mic_stream = MicAudioStream(hub.bus_for(device_id))
     pipeline_func = _get_async_pipeline_from_audio_stream()

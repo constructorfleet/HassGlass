@@ -82,6 +82,25 @@ class HassGlassHub:
         await self._persist()
         async_dispatcher_send(self.hass, SIGNAL_DEVICE_UPDATED, device_id)
 
+    async def set_device_wake_word(self, device_id: str, enabled: bool) -> None:
+        """Persist the per-device on-glass wake-word toggle."""
+        record = self._devices[device_id]
+        record.wake_word_enabled = bool(enabled)
+        await self._persist()
+        async_dispatcher_send(self.hass, SIGNAL_DEVICE_UPDATED, device_id)
+
+    async def set_device_listening(self, device_id: str, enabled: bool) -> None:
+        """Persist the per-device mic-privacy toggle.
+
+        When False, `audio.run_assist_pipeline` refuses to start a pipeline
+        run — the integration drops mic frames at the boundary rather than
+        forwarding them to the Assist pipeline.
+        """
+        record = self._devices[device_id]
+        record.listening_enabled = bool(enabled)
+        await self._persist()
+        async_dispatcher_send(self.hass, SIGNAL_DEVICE_UPDATED, device_id)
+
     # -- Live runtime --------------------------------------------------------
 
     def runtime_for(self, device_id: str) -> GlassesRuntime | None:

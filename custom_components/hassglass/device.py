@@ -39,6 +39,7 @@ class DeviceRecord:
     name: str
     pipeline_id: str | None = None
     wake_word_enabled: bool = True
+    listening_enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +51,7 @@ class DeviceRecord:
             "name": self.name,
             "pipeline_id": self.pipeline_id,
             "wake_word_enabled": self.wake_word_enabled,
+            "listening_enabled": self.listening_enabled,
         }
 
     @classmethod
@@ -63,6 +65,7 @@ class DeviceRecord:
             name=data["name"],
             pipeline_id=data.get("pipeline_id"),
             wake_word_enabled=data.get("wake_word_enabled", True),
+            listening_enabled=data.get("listening_enabled", True),
         )
 
 
