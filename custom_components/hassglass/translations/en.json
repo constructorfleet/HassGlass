@@ -44,6 +44,9 @@
     "button": {
       "dismiss_top_card": { "name": "Dismiss top HUD card" },
       "identify": { "name": "Identify" }
+    },
+    "select": {
+      "pipeline": { "name": "Assist pipeline" }
     }
   },
   "services": {
