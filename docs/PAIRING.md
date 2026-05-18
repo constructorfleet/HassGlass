@@ -5,7 +5,7 @@ This is the end-user walkthrough for getting a fresh pair of glasses talking to 
 ## What you need
 
 - A pair of Rokid Glasses with the **HassGlass Glass Agent** APK sideloaded (see [Installing the Glass Agent](#installing-the-glass-agent) below).
-- Home Assistant **2024.12.0** or newer, reachable from the glasses' Wi-Fi network.
+- Home Assistant **2026.5.0** or newer, reachable from the glasses' Wi-Fi network.
 - HA served over **HTTPS** — the integration refuses to issue pairing tokens to a plaintext HA base URL. If you're on `http://homeassistant.local:8123`, set up Nabu Casa Remote UI or a reverse proxy with a real TLS cert first.
 
 ## One-time setup in HA

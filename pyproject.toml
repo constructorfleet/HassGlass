@@ -7,7 +7,7 @@ name = "hassglass"
 version = "0.0.0"
 description = "Home Assistant integration for Rokid AR Glasses + Assist pipelines."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Teagan Glenn" }]
 
@@ -17,7 +17,7 @@ include = ["custom_components.hassglass*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 extend-exclude = ["apps", "protocol"]
 
 [tool.ruff.lint]
@@ -43,7 +43,7 @@ ignore = [
 "tests/**" = ["S", "PLR2004"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 warn_unreachable = true
 warn_unused_ignores = true

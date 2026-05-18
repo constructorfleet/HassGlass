@@ -16,7 +16,7 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `hassfest` workflow.
 - [x] `ruff` + `mypy --strict` configured in `pyproject.toml` and `ci.yml`.
 - [x] LICENSE chosen (Apache-2.0).
-- [x] `requirements-dev.txt` + Python 3.13 venv reproducible locally.
+- [x] `requirements-dev.txt` + Python 3.14 venv reproducible locally.
 
 ---
 
