@@ -13,7 +13,9 @@ from .hub import HassGlassHub
 from .hud import HudDispatcher
 from .pairing import PairingBroker
 from .pairing_view import HassGlassPairingView
+from .pipeline_bridge import PipelineBridge
 from .services import async_register_services, async_unregister_services
+from .tts_relay import TtsRelay
 from .ws_server import HassGlassWsView
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +35,8 @@ class HassGlassRuntimeData:
     hub: HassGlassHub
     pairing_broker: PairingBroker
     hud: HudDispatcher
+    bridge: PipelineBridge
+    tts_relay: TtsRelay
 
 
 type HassGlassConfigEntry = ConfigEntry[HassGlassRuntimeData]
@@ -43,9 +47,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) ->
     hub = HassGlassHub(hass, entry)
     broker = PairingBroker()
     hud = HudDispatcher(hass, hub)
-    entry.runtime_data = HassGlassRuntimeData(hub=hub, pairing_broker=broker, hud=hud)
+    tts_relay = TtsRelay(hass)
+    bridge = PipelineBridge(hub, hud, tts_relay=tts_relay)
+    entry.runtime_data = HassGlassRuntimeData(
+        hub=hub,
+        pairing_broker=broker,
+        hud=hud,
+        bridge=bridge,
+        tts_relay=tts_relay,
+    )
 
-    hass.http.register_view(HassGlassWsView(hass, hub))
+    hass.http.register_view(HassGlassWsView(hass, hub, bridge))
     hass.http.register_view(HassGlassPairingView(hub))
     async_register_services(hass, entry)
 
