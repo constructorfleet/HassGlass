@@ -9,7 +9,7 @@
   "iot_class": "local_push",
   "integration_type": "hub",
   "dependencies": ["http"],
-  "after_dependencies": ["assist_pipeline", "tts", "stt", "zeroconf"],
+  "after_dependencies": ["assist_pipeline", "tts", "stt", "media_player", "media_source", "zeroconf"],
   "zeroconf": ["_hassglass._tcp.local."],
   "requirements": []
 }
