@@ -87,5 +87,19 @@ def test_event_type_lists_are_complete() -> None:
     assert "swipe_forward" in GESTURE_EVENT_TYPES
     assert "tap" in GESTURE_EVENT_TYPES
     assert "long_press" in GESTURE_EVENT_TYPES
+    assert "head_nod" in GESTURE_EVENT_TYPES
+    assert "head_shake" in GESTURE_EVENT_TYPES
     assert "side_press" in BUTTON_EVENT_TYPES
     assert "side_long_press" in BUTTON_EVENT_TYPES
+
+
+def test_head_nod_fires_through_gesture_entity(hub: MagicMock) -> None:
+    """Head-pose gestures share the same event entity as touchpad gestures."""
+    entity = GestureEvent(hub, "d1")
+    fired: list[str] = []
+    with (
+        patch.object(entity, "_trigger_event", lambda k, attrs=None: fired.append(k)),
+        patch.object(entity, "async_write_ha_state", MagicMock()),
+    ):
+        entity._handle_input("d1", {"kind": "head_nod", "axis": "pitch"})
+    assert fired == ["head_nod"]

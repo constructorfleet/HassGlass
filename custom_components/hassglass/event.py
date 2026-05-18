@@ -36,6 +36,8 @@ GESTURE_EVENT_TYPES: tuple[str, ...] = (
     "tap",
     "double_tap",
     "long_press",
+    "head_nod",
+    "head_shake",
 )
 
 BUTTON_EVENT_TYPES: tuple[str, ...] = (
