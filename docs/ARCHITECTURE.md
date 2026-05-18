@@ -261,6 +261,36 @@ Pairing flow:
 
 ---
 
+## 7.bis Assist dependency placement
+
+`assist_pipeline`, `tts`, and `stt` are declared in `after_dependencies` —
+**not** in `dependencies`. This is deliberate:
+
+1. **The runtime cost of soft-coupling is zero.** `audio.py` lazy-imports
+   `homeassistant.components.assist_pipeline` only when an `audio.start`
+   frame arrives. Until then, HassGlass has no compile- or import-time
+   coupling to the voice subsystem at all.
+2. **The runtime cost of hard-coupling is real.** Promoting them to hard
+   `dependencies` makes the integration's setup fail if any of:
+   `pymicro_vad`, `pyspeex_noise`, `mutagen`, `hassil`,
+   `home-assistant-intents`, or the ffmpeg binary is missing or fails to
+   build. `pyspeex_noise` in particular requires native compilation against
+   the system speex headers, which breaks on macOS and any container
+   without dev tools.
+3. **`pytest-homeassistant-custom-component` doesn't initialize**
+   `hass.data[DATA_EXPOSED_ENTITIES]`, which causes `conversation` setup
+   to raise `KeyError` whenever assist_pipeline is a hard dep — cascading
+   into every test that loads HassGlass.
+
+Users who want voice get it the moment they configure an Assist pipeline
+in HA (since `after_dependencies` ensures HA loads it first when present).
+Users who don't get a working integration with `notify`, HUD cards, and
+gesture events — and HassGlass declines to start the pipeline rather
+than refuse to load at all.
+
+If HA's test harness or upstream package set ever change such that hard
+deps work cleanly, the promotion is a one-line manifest edit.
+
 ## 8. Non-goals (v1)
 
 - Rendering full Lovelace dashboards on the HUD — display is too small and monocular.
