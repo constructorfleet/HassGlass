@@ -40,6 +40,24 @@
       "worn": { "name": "Worn" },
       "listening": { "name": "Listening" },
       "connected": { "name": "Connected" }
+    },
+    "button": {
+      "dismiss_top_card": { "name": "Dismiss top HUD card" },
+      "identify": { "name": "Identify" }
+    }
+  },
+  "services": {
+    "notify": {
+      "name": "Push HUD card",
+      "description": "Show a card on a glasses device's HUD."
+    },
+    "dismiss": {
+      "name": "Dismiss HUD card",
+      "description": "Remove a HUD card by id, or all cards with card_id: \"*\"."
+    },
+    "identify": {
+      "name": "Identify glasses",
+      "description": "Briefly flash a checkmark on the HUD so the wearer knows which device was targeted."
     }
   }
 }

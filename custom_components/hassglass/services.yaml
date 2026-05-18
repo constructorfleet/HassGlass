@@ -1,0 +1,65 @@
+notify:
+  name: Push HUD card
+  description: Show a card on a glasses device's HUD.
+  fields:
+    device_id:
+      description: HassGlass device_id (from the integration's Devices page).
+      required: true
+      example: rokid-001
+      selector:
+        text:
+    card_id:
+      description: >
+        Stable identifier so updates replace the same on-screen card. Defaults
+        to an `auto-<kind>` id if omitted.
+      required: false
+      example: weather-now
+      selector:
+        text:
+    card:
+      description: Card payload. Must include `kind`; other fields depend on the kind.
+      required: true
+      example: { kind: icon_text, icon: weather-rainy, title: "62°F", subtitle: "Rain in 20 min" }
+      selector:
+        object:
+    priority:
+      description: 0–100. Higher cards preempt lower cards on the HUD stack.
+      required: false
+      default: 30
+      example: 90
+      selector:
+        number:
+          min: 0
+          max: 100
+    ttl_ms:
+      description: Auto-dismiss after this many milliseconds. Omit for sticky cards.
+      required: false
+      example: 8000
+      selector:
+        number:
+          min: 500
+          max: 600000
+          unit_of_measurement: ms
+
+dismiss:
+  name: Dismiss HUD card
+  description: Remove a HUD card by id, or all cards with `card_id: "*"`.
+  fields:
+    device_id:
+      required: true
+      selector:
+        text:
+    card_id:
+      required: true
+      example: "*"
+      selector:
+        text:
+
+identify:
+  name: Identify glasses
+  description: Briefly flash a checkmark on the HUD so the wearer knows which device was targeted.
+  fields:
+    device_id:
+      required: true
+      selector:
+        text:
