@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_DEFAULT_TTL_MS,
@@ -13,6 +14,7 @@ from .const import (
     CONF_PIPELINE_ID,
     CONF_WAKE_WORD_ENABLED,
     DEFAULT_TTL_MS,
+    DOMAIN,
     SIGNAL_DEVICE_REMOVED,
     SIGNAL_DEVICE_UPDATED,
 )
@@ -24,12 +26,20 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+_STORE_VERSION = 1
+_STORE_KEY = f"{DOMAIN}.devices"
+
 
 class HassGlassHub:
     """In-memory registry of paired devices + live runtimes.
 
-    One hub per config entry. Persistent state lives in `entry.data["devices"]`;
-    live runtimes are created on WebSocket connect and dropped on disconnect.
+    Device records persist via a dedicated `homeassistant.helpers.storage.Store`
+    rather than `entry.data` — so add_device / remove_device / pipeline + toggle
+    updates do NOT trigger config-entry reload listeners. Master options stay
+    in `entry.options` where the options flow expects them.
+
+    Migration: on first load, if a legacy `entry.data["devices"]` blob exists,
+    it's copied into the Store and the entry data is cleared (one-time).
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -38,21 +48,38 @@ class HassGlassHub:
         self._devices: dict[str, DeviceRecord] = {}
         self._runtimes: dict[str, GlassesRuntime] = {}
         self._buses: dict[str, DeviceBus] = {}
-        self._load_devices_from_entry()
+        self._store: Store[dict[str, dict[str, Any]]] = Store(
+            hass,
+            _STORE_VERSION,
+            _STORE_KEY,
+        )
 
     # -- Persistence ---------------------------------------------------------
 
-    def _load_devices_from_entry(self) -> None:
-        raw_devices = self.entry.data.get("devices", {})
-        for device_id, raw in raw_devices.items():
+    async def async_load(self) -> None:
+        """Load device records from Store, migrating from entry.data if needed."""
+        stored = await self._store.async_load()
+        if stored is None:
+            legacy = self.entry.data.get("devices")
+            if isinstance(legacy, dict) and legacy:
+                _LOGGER.info("migrating %d device record(s) from entry.data → Store", len(legacy))
+                stored = legacy
+                await self._store.async_save(stored)
+                # Drop the legacy blob so it isn't a future source of truth.
+                self.hass.config_entries.async_update_entry(
+                    self.entry,
+                    data={k: v for k, v in self.entry.data.items() if k != "devices"},
+                )
+            else:
+                stored = {}
+
+        for device_id, raw in stored.items():
             self._devices[device_id] = DeviceRecord.from_dict(raw)
 
     async def _persist(self) -> None:
-        new_data = {
-            **self.entry.data,
-            "devices": {did: rec.to_dict() for did, rec in self._devices.items()},
-        }
-        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+        await self._store.async_save(
+            {did: rec.to_dict() for did, rec in self._devices.items()},
+        )
 
     # -- Device CRUD ---------------------------------------------------------
 

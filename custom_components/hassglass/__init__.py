@@ -48,6 +48,7 @@ type HassGlassConfigEntry = ConfigEntry[HassGlassRuntimeData]
 async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) -> bool:
     """Set up HassGlass from its config entry."""
     hub = HassGlassHub(hass, entry)
+    await hub.async_load()
     broker = PairingBroker()
     hud = HudDispatcher(hass, hub)
     tts_relay = TtsRelay(hass)
