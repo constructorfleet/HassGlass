@@ -37,6 +37,7 @@ interface WsConnection {
 
 interface WsListener {
     fun onText(text: String)
+    fun onBinary(bytes: ByteArray) = Unit
     fun onClosed() = Unit
     fun onFailure(error: Throwable) = Unit
 }
