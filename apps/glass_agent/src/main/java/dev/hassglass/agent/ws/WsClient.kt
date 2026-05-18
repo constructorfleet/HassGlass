@@ -9,20 +9,29 @@ import kotlinx.serialization.json.JsonPrimitive
 private const val WS_PATH = "/api/hassglass/ws/v1"
 
 class WsClient(
-    private val transport: WsTransport,
-    private val retryPolicy: RetryPolicy = RetryPolicy(),
-    private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
+        private val transport: WsTransport,
+        private val retryPolicy: RetryPolicy = RetryPolicy(),
+        private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
+        private val onTextMessage: (String) -> Unit = {},
+        private val onBinaryFrame: (ByteArray) -> Unit = {},
 ) : AgentConnector {
     fun connectOnce(config: AgentConnectionConfig): WsConnection {
         lateinit var connection: WsConnection
-        val listener = object : WsListener {
-            override fun onText(text: String) {
-                val message = ProtocolCodec.decodeMessage(text)
-                if (message.type == MessageType.PING) {
-                    connection.sendText(ProtocolCodec.encodeMessage(MessageType.PONG))
+        val listener =
+                object : WsListener {
+                    override fun onText(text: String) {
+                        val message = ProtocolCodec.decodeMessage(text)
+                        if (message.type == MessageType.PING) {
+                            connection.sendText(ProtocolCodec.encodeMessage(MessageType.PONG))
+                            return
+                        }
+                        onTextMessage(text)
+                    }
+
+                    override fun onBinary(bytes: ByteArray) {
+                        onBinaryFrame(bytes)
+                    }
                 }
-            }
-        }
 
         connection = transport.connect(requestFor(config), listener)
         connection.sendText(helloMessage(config))
@@ -49,22 +58,22 @@ class WsClient(
     }
 
     private fun requestFor(config: AgentConnectionConfig): WsRequest =
-        WsRequest(
-            url = websocketUrl(config.haBaseUrl),
-            headers = mapOf("Authorization" to "Bearer ${config.token}"),
-        )
+            WsRequest(
+                    url = websocketUrl(config.haBaseUrl),
+                    headers = mapOf("Authorization" to "Bearer ${config.token}"),
+            )
 
     private fun helloMessage(config: AgentConnectionConfig): String =
-        ProtocolCodec.encodeMessage(
-            MessageType.HELLO,
-            mapOf(
-                "device_id" to JsonPrimitive(config.deviceId),
-                "serial" to JsonPrimitive(config.serial),
-                "firmware" to JsonPrimitive(config.firmware),
-                "agent_version" to JsonPrimitive(config.agentVersion),
-                "protocol_version" to JsonPrimitive(PROTOCOL_VERSION),
-            ),
-        )
+            ProtocolCodec.encodeMessage(
+                    MessageType.HELLO,
+                    mapOf(
+                            "device_id" to JsonPrimitive(config.deviceId),
+                            "serial" to JsonPrimitive(config.serial),
+                            "firmware" to JsonPrimitive(config.firmware),
+                            "agent_version" to JsonPrimitive(config.agentVersion),
+                            "protocol_version" to JsonPrimitive(PROTOCOL_VERSION),
+                    ),
+            )
 
     private fun telemetryMessage(snapshot: TelemetrySnapshot): String {
         val fields = linkedMapOf<String, JsonElement>()
@@ -76,11 +85,12 @@ class WsClient(
 
     private fun websocketUrl(haBaseUrl: String): String {
         val trimmed = haBaseUrl.trimEnd('/')
-        val withScheme = when {
-            trimmed.startsWith("https://") -> "wss://${trimmed.removePrefix("https://")}"
-            trimmed.startsWith("http://") -> "ws://${trimmed.removePrefix("http://")}"
-            else -> trimmed
-        }
+        val withScheme =
+                when {
+                    trimmed.startsWith("https://") -> "wss://${trimmed.removePrefix("https://")}"
+                    trimmed.startsWith("http://") -> "ws://${trimmed.removePrefix("http://")}"
+                    else -> trimmed
+                }
         return "$withScheme$WS_PATH"
     }
 }

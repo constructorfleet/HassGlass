@@ -3,15 +3,13 @@ package dev.hassglass.agent.hud
 /**
  * A primitive HUD operation that a Caps-backed renderer can execute.
  *
- * Splitting "what to draw" (this ADT) from "how Caps does it" (the
- * [CapsHudRenderer] adapter) keeps the per-kind layout logic in pure,
- * hermetic Kotlin — testable without a real Caps surface — and confines
- * the hardware-gated SDK calls to a single small class.
+ * Splitting "what to draw" (this ADT) from "how Caps does it" (the [CapsHudRenderer] adapter) keeps
+ * the per-kind layout logic in pure, hermetic Kotlin — testable without a real HUD surface — and
+ * confines the device-specific drawing code to a single small class.
  *
- * The set of commands here is intentionally minimal; it's what the
- * monocular right-eye micro-LED panel can actually display readably.
- * If a future card kind needs something we don't have, add a new case
- * here, extend the translator, and the adapter gets one more `when` arm.
+ * The set of commands here is intentionally minimal; it's what the monocular right-eye micro-LED
+ * panel can actually display readably. If a future card kind needs something we don't have, add a
+ * new case here, extend the translator, and the adapter gets one more `when` arm.
  */
 sealed class CapsCommand {
     object Clear : CapsCommand()
@@ -24,13 +22,16 @@ sealed class CapsCommand {
     data class Severity(val level: SeverityLevel) : CapsCommand()
     object Render : CapsCommand()
 
-    enum class SeverityLevel { INFO, WARNING, CRITICAL }
+    enum class SeverityLevel {
+        INFO,
+        WARNING,
+        CRITICAL
+    }
 }
 
 /**
- * Translate a [HudCardEnvelope] into the ordered list of Caps commands
- * that draws it. Kind-shape pairs are kept in sync with the integration's
- * `custom_components/hassglass/cards.py` validation.
+ * Translate a [HudCardEnvelope] into the ordered list of Caps commands that draws it. Kind-shape
+ * pairs are kept in sync with the integration's `custom_components/hassglass/cards.py` validation.
  */
 object CapsCommandTranslator {
     private const val MAX_LIST_ITEMS = 4
@@ -103,22 +104,21 @@ object CapsCommandTranslator {
     }
 
     private fun parseSeverity(raw: String): CapsCommand.SeverityLevel =
-        when (raw.lowercase()) {
-            "warning" -> CapsCommand.SeverityLevel.WARNING
-            "critical" -> CapsCommand.SeverityLevel.CRITICAL
-            else -> CapsCommand.SeverityLevel.INFO
-        }
+            when (raw.lowercase()) {
+                "warning" -> CapsCommand.SeverityLevel.WARNING
+                "critical" -> CapsCommand.SeverityLevel.CRITICAL
+                else -> CapsCommand.SeverityLevel.INFO
+            }
 }
 
 /**
- * Production HudRenderer that translates cards through
- * [CapsCommandTranslator] and feeds the resulting commands to the real
- * Caps SDK. The actual SDK call is behind a tiny abstraction so:
- *  - the per-kind layout logic stays unit-testable,
- *  - the SDK surface is one swap-point when Rokid changes their API.
+ * Production HudRenderer that translates cards through [CapsCommandTranslator] and feeds the
+ * resulting commands to the real Caps SDK. The actual SDK call is behind a tiny abstraction so:
+ * - the per-kind layout logic stays unit-testable,
+ * - the SDK surface is one swap-point when Rokid changes their API.
  *
- * Hardware-gated: until the Caps SDK headers are checked in, [CapsSurface]
- * has no concrete implementation and instantiating this class throws.
+ * Production currently uses [AndroidCapsSurface], a Canvas-backed adapter. A Rokid-native Caps SDK
+ * adapter can be added later behind the same [CapsSurface] contract if the platform exposes one.
  */
 class CapsHudRenderer(private val surface: CapsSurface) : HudRenderer {
     override fun render(card: HudCardEnvelope?) {
@@ -127,7 +127,7 @@ class CapsHudRenderer(private val surface: CapsSurface) : HudRenderer {
     }
 }
 
-/** Adapter onto the on-device Caps SDK. Implemented once hardware is available. */
+/** Adapter surface for HUD drawing backends such as [AndroidCapsSurface]. */
 interface CapsSurface {
     fun execute(command: CapsCommand)
 }

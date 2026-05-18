@@ -5,6 +5,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import okio.ByteString.Companion.toByteString
 
 class OkHttpWsTransport(
@@ -21,6 +22,10 @@ class OkHttpWsTransport(
         object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 onText(text)
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                onBinary(bytes.toByteArray())
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

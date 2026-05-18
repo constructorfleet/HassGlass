@@ -14,15 +14,15 @@ class WsClientTest {
         val client = WsClient(transport)
 
         client.connectOnce(
-            AgentConnectionConfig(
-                haBaseUrl = "https://ha.example",
-                deviceId = "rokid-1",
-                serial = "SN123",
-                firmware = "1.2.3",
-                agentVersion = "0.1.0",
-                token = "device-token",
-                telemetry = TelemetrySnapshot(batteryPct = 82, rssiDbm = -61, worn = true),
-            ),
+                AgentConnectionConfig(
+                        haBaseUrl = "https://ha.example",
+                        deviceId = "rokid-1",
+                        serial = "SN123",
+                        firmware = "1.2.3",
+                        agentVersion = "0.1.0",
+                        token = "device-token",
+                        telemetry = TelemetrySnapshot(batteryPct = 82, rssiDbm = -61, worn = true),
+                ),
         )
 
         assertEquals("wss://ha.example/api/hassglass/ws/v1", transport.requests.single().url)
@@ -52,14 +52,35 @@ class WsClientTest {
     }
 
     @Test
+    fun nonPingTextAndBinaryFramesRouteToRuntimeCallbacks() {
+        val transport = FakeTransport()
+        val receivedText = mutableListOf<String>()
+        val receivedBinary = mutableListOf<ByteArray>()
+        val client =
+                WsClient(
+                        transport = transport,
+                        onTextMessage = { receivedText.add(it) },
+                        onBinaryFrame = { receivedBinary.add(it) },
+                )
+
+        client.connectOnce(minimalConfig())
+        transport.listener!!.onText("""{"type":"hud.dismiss","id":"x"}""")
+        transport.listener!!.onBinary(byteArrayOf(1, 2, 3))
+
+        assertEquals(listOf("""{"type":"hud.dismiss","id":"x"}"""), receivedText)
+        assertEquals(listOf(byteArrayOf(1, 2, 3).toList()), receivedBinary.map { it.toList() })
+    }
+
+    @Test
     fun connectWithRetryRetriesAfterFailure() {
         val transport = FakeTransport(failuresBeforeSuccess = 2)
         val delays = mutableListOf<Long>()
-        val client = WsClient(
-            transport = transport,
-            retryPolicy = RetryPolicy(initialDelayMs = 100, maxDelayMs = 500),
-            sleeper = delays::add,
-        )
+        val client =
+                WsClient(
+                        transport = transport,
+                        retryPolicy = RetryPolicy(initialDelayMs = 100, maxDelayMs = 500),
+                        sleeper = delays::add,
+                )
 
         client.connectWithRetry(minimalConfig(), maxAttempts = 3)
 
@@ -68,18 +89,18 @@ class WsClientTest {
     }
 
     private fun minimalConfig(): AgentConnectionConfig =
-        AgentConnectionConfig(
-            haBaseUrl = "https://ha.example",
-            deviceId = "rokid-1",
-            serial = "SN123",
-            firmware = "1.2.3",
-            agentVersion = "0.1.0",
-            token = "device-token",
-        )
+            AgentConnectionConfig(
+                    haBaseUrl = "https://ha.example",
+                    deviceId = "rokid-1",
+                    serial = "SN123",
+                    firmware = "1.2.3",
+                    agentVersion = "0.1.0",
+                    token = "device-token",
+            )
 }
 
 private class FakeTransport(
-    private var failuresBeforeSuccess: Int = 0,
+        private var failuresBeforeSuccess: Int = 0,
 ) : WsTransport {
     val requests = mutableListOf<WsRequest>()
     val connection = FakeConnection()

@@ -43,7 +43,7 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] Android/Kotlin Gradle skeleton with protocol codec unit tests and CI.
 - [x] WS client core + OkHttp transport with reconnect, paired settings storage.
 - [x] Pairing client core: code generation, transport, token persistence.
-- [x] `MicSource` interface; `FakeMicSource` for tests; `CxrlMicSource` skeleton with a clear KDoc of the hardware-gated AIDL binding work (the only path that needs a real Rokid device).
+- [x] `MicSource` interface; `FakeMicSource` for tests; `AndroidMicSource` for stock Android capture; `CxrlMicSource` retained as the privileged follow-up path for Rokid AEC routing.
 - [ ] Actual CXR-L AIDL `.aidl` file + binder code (one tiny class — gated on access to a real glasses unit + the Rokid SDK headers).
 - [ ] 6-digit pairing flow rendered on the Rokid HUD via Caps primitives.
 
@@ -60,7 +60,8 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `__init__.py` wired with full `HassGlassRuntimeData(hub, pairing_broker, hud, bridge, tts_relay, options_snapshot)`.
 - [x] `notify.py` — modern `NotifyEntity` platform (replaced the M2 legacy-platform rollback).
 - [x] Card priority stack + TTL on the **Glass Agent** (`CardStack` + `HudController` with a `LoggingHudRenderer`).
-- [x] **Caps renderer scaffold** — `CapsCommand` ADT + `CapsCommandTranslator` (per-kind layout logic, fully unit-tested) + `CapsHudRenderer` adapter. The single hardware-gated piece is the `CapsSurface` adapter onto the Rokid SDK.
+- [x] **Caps renderer scaffold** — `CapsCommand` ADT + `CapsCommandTranslator` (per-kind layout logic, fully unit-tested) + `CapsHudRenderer` adapter.
+- [x] **Current-device HUD adapter** — `AndroidCapsSurface` renders the command stream onto an Android `Canvas` today; a Rokid-native Caps SDK adapter can still replace the sink later without changing the renderer contract.
 - [x] Starter blueprints: `doorbell_to_hud`, `timer_to_hud`, `motion_to_hud`, `alarm_to_hud`.
 
 ---
@@ -86,7 +87,7 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `MicFrameSender` packages PCM as channel-0x01 binary frames.
 - [x] **`MicSession`** — orchestrator that brackets a capture with `audio.start { trigger }` / `audio.stop` and pipes the MicSource through MicFrameSender. Idempotent start/stop; same path for wake-word and button triggers.
 - [x] **`TtsPlayer`** — channel-0x02 decode path with sequence ordering, late-frame dropping, gap reporting, and end-of-utterance flush. `TtsPlaybackSink` interface so AudioTrack vs in-memory is one swap.
-- [ ] `WsListener.onBinary` → `TtsPlayer.accept` wired into `OkHttpWsTransport`. ~3 lines, paired with a recorded session to verify ordering against the integration's TtsRelay.
+- [x] `WsListener.onBinary` → `TtsPlayer.accept` wired through the service-owned runtime via `WsClient` inbound callbacks. Unit-tested at the transport and runtime layers.
 - [ ] Production `AudioTrackPlaybackSink` (16k mono PCM via Android `AudioTrack`).
 - [ ] Production `CxrlMicSource` (CXR-L AIDL binding).
 
@@ -139,13 +140,17 @@ Snapshot at end of last work session:
 
 **What's left before M5:**
 
-The runtime contracts are all in place. The remaining work is exclusively the three hardware-gated adapters — each is a tiny class implementing an already-defined interface:
+The runtime contracts are now implemented for the non-privileged Android path:
 
-1. `CxrlMicSource` — bind to the CXR-L AIDL service, request the AEC mic path, feed PCM into the existing `MicSession`.
-2. `AudioTrackPlaybackSink` — implement `TtsPlaybackSink` against Android's `AudioTrack` at 16k mono PCM.
-3. `CapsSurface` — implement `execute(CapsCommand)` against the Rokid Caps SDK.
+1. `AndroidMicSource` captures 16 kHz mono PCM through `AudioRecord` and feeds the existing `MicSession`.
+2. `AudioTrackPlaybackSink` + `AndroidAudioTrackWriter` play 16 kHz mono PCM through Android `AudioTrack`, including WAV-header stripping on the first chunk.
+3. `AndroidCapsSurface` executes `CapsCommand` onto an Android `Canvas` so the HUD path is live without depending on the Rokid SDK headers.
 
-Plus the one-line wiring: route `WsListener.onBinary` in `OkHttpWsTransport` to `TtsPlayer.accept`. Held back specifically so we can validate against a captured session rather than guess at frame ordering edge cases.
+The only adapter-level follow-up before a fully privileged Rokid build is the CXR-L mic path:
+
+1. `CxrlMicSource` — bind to the CXR-L AIDL service, request the AEC mic path, and swap it in where the app currently uses `AndroidMicSource`.
+
+The remaining runtime follow-up is visual HUD hosting: the service currently composes the inbound HUD path through the runtime but still uses `LoggingHudRenderer` until a real `SurfaceHolder` host exists for `AndroidCapsSurface`.
 
 ---
 
