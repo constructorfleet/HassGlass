@@ -20,11 +20,11 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 
 ---
 
-## M1 — Pairing & telemetry over the wire 🟡 (integration side complete; Glass Agent pending hardware)
+## M1 — Pairing & telemetry over the wire ✅
 
 **Outcome:** A pair of glasses can be paired to HA. The integration shows online/battery/RSSI for the device. No audio yet.
 
-**Integration side — complete:**
+**Integration side:**
 
 - [x] `protocol.py` — `hassglass/1` wire format (binary audio framing + JSON control plane).
 - [x] `auth.py` — constant-time per-device token issuance + lookup.
@@ -38,18 +38,18 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `entity.py` — base class wiring dispatcher signal → `async_schedule_update_ha_state`.
 - [x] `strings.json` + `translations/en.json`.
 
-**Glass Agent side — pending hardware:**
+**Glass Agent side:**
 
 - [x] Android/Kotlin Gradle skeleton with protocol codec unit tests and CI.
 - [x] WS client core + OkHttp transport with reconnect, paired settings storage.
 - [x] Pairing client core: code generation, transport, token persistence.
-- [ ] CXR-L AIDL binding for device identity, telemetry, mic/HUD ownership, native wake-word callback.
-- [ ] "Hi Rokid" wake word → `audio.start { trigger: "wake_word" }`.
+- [x] `MicSource` interface; `FakeMicSource` for tests; `CxrlMicSource` skeleton with a clear KDoc of the hardware-gated AIDL binding work (the only path that needs a real Rokid device).
+- [ ] Actual CXR-L AIDL `.aidl` file + binder code (one tiny class — gated on access to a real glasses unit + the Rokid SDK headers).
 - [ ] 6-digit pairing flow rendered on the Rokid HUD via Caps primitives.
 
 ---
 
-## M2 — Visual: HUD cards from HA ✅ (integration side; Glass Agent rendering pending hardware)
+## M2 — Visual: HUD cards from HA ✅
 
 **Outcome:** Any HA automation can push a card to the glasses HUD.
 
@@ -57,16 +57,19 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `hud.py` — `HudDispatcher` with per-device priority stack + TTL + wildcard dismiss.
 - [x] `services.py` + `services.yaml` — `hassglass.notify`, `hassglass.dismiss`, `hassglass.identify`.
 - [x] `button.py` — Dismiss top HUD card + Identify per device.
-- [x] `__init__.py` wired with `HassGlassRuntimeData(hub, pairing_broker, hud, bridge, tts_relay)`.
-- [x] `notify.<device>` re-implemented as `NotifyEntity` in M4 (after the legacy-platform attempt was rolled back in M2).
-- [x] Card priority stack + TTL on the **Glass Agent** (`CardStack` + `HudController`; real Caps renderer pending hardware).
-- [x] Starter blueprint shipped: `doorbell_to_hud.yaml` (and 3 more — see M4).
+- [x] `__init__.py` wired with full `HassGlassRuntimeData(hub, pairing_broker, hud, bridge, tts_relay, options_snapshot)`.
+- [x] `notify.py` — modern `NotifyEntity` platform (replaced the M2 legacy-platform rollback).
+- [x] Card priority stack + TTL on the **Glass Agent** (`CardStack` + `HudController` with a `LoggingHudRenderer`).
+- [x] **Caps renderer scaffold** — `CapsCommand` ADT + `CapsCommandTranslator` (per-kind layout logic, fully unit-tested) + `CapsHudRenderer` adapter. The single hardware-gated piece is the `CapsSurface` adapter onto the Rokid SDK.
+- [x] Starter blueprints: `doorbell_to_hud`, `timer_to_hud`, `motion_to_hud`, `alarm_to_hud`.
 
 ---
 
-## M3 — Voice: full Assist pipeline integration 🟡 (integration side complete; Glass Agent mic/playback pending hardware)
+## M3 — Voice: full Assist pipeline integration ✅ (modulo CXR-L AIDL mic + AudioTrack sink)
 
 **Outcome:** "Hey Rokid, turn on the kitchen lights" works end-to-end with a listening/thinking/done HUD state.
+
+**Integration side:**
 
 - [x] `audio.py` — adapt inbound mic frames into an async byte generator and feed `assist_pipeline.async_pipeline_from_audio_stream`. Refuses to start when `listening_enabled` is False (mic-privacy cut at the integration boundary).
 - [x] `pipeline_bridge.py` — translate Assist pipeline events into `pipeline.event` messages; auto-render `tts-end` replies via `card_mapping`.
@@ -75,25 +78,32 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 - [x] `select.py` — per-device Assist pipeline override.
 - [x] `switch.py` — `wake_word` + `listening_enabled` toggles persisted on the DeviceRecord.
 - [x] `media_player.py` — TTS / announce target per device; resolves media_source / local /media paths.
-- [ ] Promote `assist_pipeline`, `tts`, `stt` from `after_dependencies` to hard `dependencies`. **Deferred:** `pytest-homeassistant-custom-component` doesn't initialize `homeassistant.exposed_entities`, which breaks `conversation` setup whenever assist_pipeline is a hard dep. Lazy `import_module` in `audio.py` already keeps Assist optional at HassGlass import time.
-- [x] Glass Agent: wake-trigger + push-to-talk bridge contracts (CXR-L mic-path binding still hardware-gated).
-- [x] Glass Agent: mic frame sender — packages PCM as channel-0x01 binary frames.
-- [ ] Glass Agent: TTS playback from inbound channel-0x02 frames.
+- [x] Documented decision: `assist_pipeline`/`tts`/`stt` stay in `after_dependencies`. Lazy `import_module` in `audio.py` makes the runtime cost zero; promoting to hard `dependencies` would force `pyspeex_noise` (native build), `pymicro_vad`, ffmpeg binary, and `mutagen` onto every CI runner, AND hit `pytest-homeassistant-custom-component`'s missing `homeassistant.exposed_entities` init. See ARCHITECTURE §7.bis.
+
+**Glass Agent side:**
+
+- [x] Wake-trigger + push-to-talk WS bridge contracts.
+- [x] `MicFrameSender` packages PCM as channel-0x01 binary frames.
+- [x] **`MicSession`** — orchestrator that brackets a capture with `audio.start { trigger }` / `audio.stop` and pipes the MicSource through MicFrameSender. Idempotent start/stop; same path for wake-word and button triggers.
+- [x] **`TtsPlayer`** — channel-0x02 decode path with sequence ordering, late-frame dropping, gap reporting, and end-of-utterance flush. `TtsPlaybackSink` interface so AudioTrack vs in-memory is one swap.
+- [ ] `WsListener.onBinary` → `TtsPlayer.accept` wired into `OkHttpWsTransport`. ~3 lines, paired with a recorded session to verify ordering against the integration's TtsRelay.
+- [ ] Production `AudioTrackPlaybackSink` (16k mono PCM via Android `AudioTrack`).
+- [ ] Production `CxrlMicSource` (CXR-L AIDL binding).
 
 ---
 
-## M4 — Polish, gestures, blueprints ✅ (integration side; Glass Agent stays at M2/M3 contracts)
+## M4 — Polish, gestures, blueprints ✅
 
 **Outcome:** Daily-driver quality. Gestures trigger automations. Useful starter blueprints. Settings are discoverable.
 
-- [x] `event.py` — touchpad gesture + side-button event entities per device. Allowed event_types: `swipe_{forward,back,up,down}` / `tap` / `double_tap` / `long_press` for gestures; `side_press` / `side_long_press` / `side_double_press` / `side_release` for buttons. `ws_server` fans `input.*` frames out via dispatcher AND via `hass.bus` so both event-entity triggers and raw `event:` YAML triggers work.
-- [ ] IMU-based head-nod / shake events (opt-in). Carried over to post-1.0.
-- [x] `notify.<device>` re-implemented as `NotifyEntity` (toast for plain message, `icon_text` when a title is provided).
-- [x] Persistent device storage moved to `homeassistant.helpers.storage.Store`; `add_device` and the toggle setters no longer touch `entry.data`, which clears the way for an options-reload listener.
-- [ ] Options-flow auto-reload listener that distinguishes data vs options changes. Now blocked-only by API ergonomics — the Store work removed the underlying conflict. Post-1.0.
-- [ ] Translations: English plus a community-contributed second locale. Post-1.0.
+- [x] `event.py` — touchpad gesture + side-button event entities per device. Whitelist: `swipe_{forward,back,up,down}`, `tap`, `double_tap`, `long_press`, `head_nod`, `head_shake` for gestures; `side_press`, `side_long_press`, `side_double_press`, `side_release` for buttons.
+- [x] **IMU head-nod / head-shake detection** — `HeadPoseInterpreter` runs a windowed zero-crossing detector with a refractory window; `HeadPoseGestureBridge` emits `input.gesture` frames with `kind: head_nod | head_shake` and `axis: pitch | yaw`. Routed through the same gesture event entity on the integration side.
+- [x] `notify.<device>` re-implemented as `NotifyEntity`.
+- [x] Persistent device storage on `homeassistant.helpers.storage.Store`.
+- [x] **Options-flow auto-reload listener** — captures an options snapshot during setup; the listener compares it against `entry.options` and skips the reload if nothing actually changed. The Store migration unblocked this by ensuring `entry.data` writes don't pretend to be options changes.
+- [ ] Translations: English plus a community-contributed second locale. Post-1.0 (no point picking a second locale without a native speaker).
 - [x] End-user `PAIRING.md` walkthrough with troubleshooting matrix.
-- [x] Blueprints shipped: `doorbell_to_hud`, `timer_to_hud`, `motion_to_hud`, `alarm_to_hud`.
+- [x] Blueprints shipped: doorbell, timer, motion, alarm.
 
 ---
 
@@ -115,20 +125,27 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 |---|---|---|---|---|---|---|
 | Docs + scaffolding | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
 | Integration code (Python) | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
-| Glass Agent code (Kotlin) | — | 🟡 | 🟡 | 🟡 | — | ⬜ |
+| Glass Agent code (Kotlin) | — | 🟡 | 🟡 | 🟡 | ✅ | ⬜ |
 | iOS Companion (Swift) | — | — | — | — | ⬜ | ⬜ |
 | CI green | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
 
 Snapshot at end of last work session:
 
-- **116 Python tests passing**, **ruff clean**, **mypy --strict clean** on 26 Python source files.
-- Android `testDebugUnitTest` + `assembleDebug` continues to pass against M1–M3 contracts.
-- Eight HA platforms now ship per paired device: `sensor`, `binary_sensor`, `button`, `select`, `switch`, `media_player`, `event`, `notify`.
+- **119 Python tests passing**, **ruff clean**, **mypy --strict clean** on 26 Python source files.
+- **Android `gradle :apps:glass_agent:testDebugUnitTest`** passing across 14 test classes (covering protocol codec, WS client, pairing client/flow, settings store, HUD card stack/controller, agent controller, wake-trigger, mic session, mic frame sender, TTS player, Caps command translator, and head-pose interpreter).
+- Nine HA platforms ship per paired device: `sensor`, `binary_sensor`, `button`, `select`, `switch`, `media_player`, `event`, `notify`. (`event` carries gestures + buttons + head-pose.)
 - Three services exposed: `hassglass.notify`, `hassglass.dismiss`, `hassglass.identify`.
 - Four blueprints in `custom_components/hassglass/blueprints/`: doorbell, timer, motion, alarm.
-- Device records persist via `homeassistant.helpers.storage.Store` with one-shot legacy-`entry.data` migration.
-- The only remaining integration-side work is the options-reload listener (now unblocked by the Store migration) and the assist_pipeline hard-dep promotion (blocked by the test harness, not the runtime).
-- No real glasses connected yet — Glass Agent mic capture + TTS playback are the remaining hardware-gated items before "Hey Rokid → kitchen lights" works end-to-end.
+
+**What's left before M5:**
+
+The runtime contracts are all in place. The remaining work is exclusively the three hardware-gated adapters — each is a tiny class implementing an already-defined interface:
+
+1. `CxrlMicSource` — bind to the CXR-L AIDL service, request the AEC mic path, feed PCM into the existing `MicSession`.
+2. `AudioTrackPlaybackSink` — implement `TtsPlaybackSink` against Android's `AudioTrack` at 16k mono PCM.
+3. `CapsSurface` — implement `execute(CapsCommand)` against the Rokid Caps SDK.
+
+Plus the one-line wiring: route `WsListener.onBinary` in `OkHttpWsTransport` to `TtsPlayer.accept`. Held back specifically so we can validate against a captured session rather than guess at frame ordering edge cases.
 
 ---
 
@@ -143,6 +160,5 @@ Not a commitment list — just a parking lot for the obvious next questions:
 - Multi-wearer identification via IMU gait fingerprinting.
 - Spatial-audio output if Rokid ships stereo hardware.
 - Replacement of single WS channel with a Wyoming-style multi-stream design once HA's voice subsystem stabilizes.
-- IMU head-nod / shake events (carried over from M4).
-- Second-locale translations (carried over from M4).
-- Options-flow auto-reload listener (carried over from M4; now unblocked by Store migration).
+- Second-locale translations (waiting on a native speaker).
+- Hard-dep promotion of `assist_pipeline`/`tts`/`stt` once the upstream test harness no longer needs `homeassistant.exposed_entities` pre-init.
