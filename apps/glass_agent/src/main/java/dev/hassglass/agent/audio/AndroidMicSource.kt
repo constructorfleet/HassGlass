@@ -1,5 +1,6 @@
 package dev.hassglass.agent.audio
 
+import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -82,6 +83,7 @@ internal class AndroidMicCaptureSessionFactory(
         private val audioSource: Int = MediaRecorder.AudioSource.VOICE_RECOGNITION,
 ) : MicCaptureSessionFactory {
 
+    @SuppressLint("MissingPermission")
     override fun open(): MicCaptureSession {
         val channelMask = AudioFormat.CHANNEL_IN_MONO
         val encoding = AudioFormat.ENCODING_PCM_16BIT

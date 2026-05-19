@@ -60,8 +60,7 @@ class HassGlassEntity(Entity):
 
     @property
     def available(self) -> bool:
-        runtime = self._hub.runtime_for(self._device_id)
-        return runtime is not None and runtime.connected
+        return self._hub.get_device(self._device_id) is not None
 
     @callback
     def _handle_device_signal(self, device_id: str) -> None:
