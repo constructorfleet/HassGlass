@@ -7,33 +7,43 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.nsd.NsdManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.hassglass.agent.discovery.HassGlassAdvertiser
+import dev.hassglass.agent.discovery.HomeAssistantDiscovery
 import dev.hassglass.agent.pairing.AgentIdentity
-import dev.hassglass.agent.pairing.LoggingPairingCodeRenderer
 import dev.hassglass.agent.pairing.OkHttpPairingTransport
 import dev.hassglass.agent.pairing.PairingClient
-import dev.hassglass.agent.pairing.PairingFlowController
+import dev.hassglass.agent.pairing.PairingCodeGenerator
 import dev.hassglass.agent.settings.AgentSettingsStore
 import dev.hassglass.agent.settings.SharedPreferencesKeyValueStore
 import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
- * Minimal on-glasses launcher: surfaces pairing entry when no settings exist, otherwise lets the
- * user start/stop the foreground agent service.
+ * On-glasses launcher.
+ *
+ * Unpaired path:
+ *  - Generate a 6-digit pairing code.
+ *  - Discover HA via mDNS (`_home-assistant._tcp.local.`) — no URL input needed.
+ *  - Advertise `_hassglass._tcp.local.` so HA's zeroconf integration surfaces a "Discovered"
+ *    card with our identity + code in TXT records.
+ *  - POST the code to HA's pairing endpoint and park; HA resolves the POST once the user
+ *    confirms the code in the HA UI.
+ *
+ * Paired path:
+ *  - Start/Stop the foreground agent service. Clear-pairing escape hatch.
  */
 class MainActivity : Activity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -42,11 +52,17 @@ class MainActivity : Activity() {
     private lateinit var preferences: SharedPreferences
     private lateinit var settingsStore: AgentSettingsStore
     private lateinit var deviceId: String
+    private lateinit var advertiser: HassGlassAdvertiser
+    private lateinit var discovery: HomeAssistantDiscovery
+
+    private var discoveryHandle: HomeAssistantDiscovery.Handle? = null
+    private var pairingInFlight: Boolean = false
+    private var pendingCode: String? = null
 
     private lateinit var statusView: TextView
-    private lateinit var hostInput: EditText
-    private lateinit var pairButton: Button
     private lateinit var codeView: TextView
+    private lateinit var pairButton: Button
+    private lateinit var cancelPairButton: Button
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
     private lateinit var clearPairingButton: Button
@@ -58,12 +74,16 @@ class MainActivity : Activity() {
         deviceId = preferences.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
             preferences.edit().putString(KEY_DEVICE_ID, it).apply()
         }
+        val nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
+        advertiser = HassGlassAdvertiser(nsd)
+        discovery = HomeAssistantDiscovery(nsd)
 
         setContentView(buildLayout())
         renderState()
     }
 
     override fun onDestroy() {
+        stopPairing()
         pairingExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -95,28 +115,26 @@ class MainActivity : Activity() {
         }
         root.addView(statusView, lp(0, bottom = 24))
 
-        hostInput = EditText(this).apply {
-            hint = "https://homeassistant.local:8123"
-            setHintTextColor(Color.GRAY)
-            setTextColor(Color.WHITE)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setSingleLine(true)
-        }
-        root.addView(hostInput, lp(WRAP_CONTENT, bottom = 16))
-
-        pairButton = Button(this).apply {
-            text = "Pair with Home Assistant"
-            setOnClickListener { onPairClicked() }
-        }
-        root.addView(pairButton, lp(WRAP_CONTENT, bottom = 16))
-
         codeView = TextView(this).apply {
             setTextColor(Color.parseColor("#00E5FF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 36f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 48f)
             gravity = Gravity.CENTER
             visibility = View.GONE
         }
-        root.addView(codeView, lp(WRAP_CONTENT, bottom = 16))
+        root.addView(codeView, lp(MATCH_PARENT, bottom = 16))
+
+        pairButton = Button(this).apply {
+            text = "Pair with Home Assistant"
+            setOnClickListener { startPairing() }
+        }
+        root.addView(pairButton, lp(WRAP_CONTENT, bottom = 16))
+
+        cancelPairButton = Button(this).apply {
+            text = "Cancel pairing"
+            setOnClickListener { stopPairing(); renderState() }
+            visibility = View.GONE
+        }
+        root.addView(cancelPairButton, lp(WRAP_CONTENT, bottom = 16))
 
         startButton = Button(this).apply {
             text = "Start agent"
@@ -147,57 +165,90 @@ class MainActivity : Activity() {
     private fun renderState() {
         val paired = settingsStore.loadPairedSettings()
         if (paired == null) {
-            setStatus("Not paired. Enter your Home Assistant base URL, then tap Pair.")
-            hostInput.visibility = View.VISIBLE
-            pairButton.visibility = View.VISIBLE
+            if (pairingInFlight) {
+                pairButton.visibility = View.GONE
+                cancelPairButton.visibility = View.VISIBLE
+                codeView.visibility = View.VISIBLE
+            } else {
+                setStatus("Not paired. Tap Pair, then enter the code in Home Assistant.")
+                codeView.visibility = View.GONE
+                pairButton.visibility = View.VISIBLE
+                cancelPairButton.visibility = View.GONE
+            }
             startButton.visibility = View.GONE
             stopButton.visibility = View.GONE
             clearPairingButton.visibility = View.GONE
         } else {
             setStatus("Paired with ${paired.haBaseUrl}.")
-            hostInput.visibility = View.GONE
-            pairButton.visibility = View.GONE
             codeView.visibility = View.GONE
+            pairButton.visibility = View.GONE
+            cancelPairButton.visibility = View.GONE
             startButton.visibility = View.VISIBLE
             stopButton.visibility = View.VISIBLE
             clearPairingButton.visibility = View.VISIBLE
         }
     }
 
-    private fun onPairClicked() {
-        val host = hostInput.text.toString().trim()
-        if (host.isEmpty()) {
-            setStatus("Enter the Home Assistant base URL first.")
-            return
-        }
-        val identity = AgentIdentity(
-            deviceId = deviceId,
-            serial = Build.SERIAL.takeIf { it.isNotBlank() && it != Build.UNKNOWN } ?: deviceId,
-            firmware = Build.DISPLAY ?: Build.VERSION.RELEASE,
-            agentVersion = AGENT_VERSION,
-            name = Build.MODEL ?: "HassGlass",
-        )
-        val flow = PairingFlowController(LoggingPairingCodeRenderer())
-        val code = flow.start()
+    private fun startPairing() {
+        if (pairingInFlight) return
+        val identity = currentIdentity()
+        val code = PairingCodeGenerator.generate()
+        pendingCode = code
+        pairingInFlight = true
         codeView.text = code
-        codeView.visibility = View.VISIBLE
-        setStatus("Pairing code: $code — enter it in Home Assistant.")
-        pairButton.isEnabled = false
+        setStatus("Searching for Home Assistant on the network…")
+        renderState()
+        advertiser.advertise(identity, code)
+        discoveryHandle = discovery.discover(object : HomeAssistantDiscovery.Listener {
+            override fun onDiscovered(result: HomeAssistantDiscovery.Discovered) {
+                mainHandler.post {
+                    setStatus("Found HA at ${result.baseUrl}. Enter $code in Home Assistant.")
+                }
+                submitClaim(result.baseUrl, code, identity)
+            }
 
+            override fun onError(message: String) {
+                mainHandler.post { setStatus("Discovery error: $message") }
+            }
+        })
+    }
+
+    private fun submitClaim(baseUrl: String, code: String, identity: AgentIdentity) {
+        if (!pairingInFlight) return
         pairingExecutor.execute {
-            val pairingClient = PairingClient(OkHttpPairingTransport(), settingsStore)
-            val result = runCatching { pairingClient.claim(host, code, identity) }
+            val client = PairingClient(OkHttpPairingTransport(), settingsStore)
+            val result = runCatching { client.claim(baseUrl, code, identity) }
             mainHandler.post {
-                pairButton.isEnabled = true
+                if (!pairingInFlight || pendingCode != code) return@post
+                pairingInFlight = false
+                stopPairing()
                 result.onSuccess {
                     setStatus("Paired with ${it.haBaseUrl}.")
                     renderState()
                 }.onFailure { error ->
                     setStatus("Pairing failed: ${error.message ?: error.javaClass.simpleName}")
+                    renderState()
                 }
             }
         }
     }
+
+    private fun stopPairing() {
+        pairingInFlight = false
+        pendingCode = null
+        discoveryHandle?.stop()
+        discoveryHandle = null
+        advertiser.unregister()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentIdentity(): AgentIdentity = AgentIdentity(
+        deviceId = deviceId,
+        serial = Build.SERIAL.takeIf { it.isNotBlank() && it != Build.UNKNOWN } ?: deviceId,
+        firmware = Build.DISPLAY ?: Build.VERSION.RELEASE,
+        agentVersion = AGENT_VERSION,
+        name = Build.MODEL ?: "HassGlass",
+    )
 
     private fun onStartClicked() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
