@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -226,9 +227,11 @@ class MainActivity : Activity() {
         codeView.text = code
         setStatus("Searching for Home Assistant on the network…")
         renderState()
+        Log.i(TAG, "pair: started code=$code device_id=${identity.deviceId}")
         advertiser.advertise(identity, code)
         discoveryHandle = discovery.discover(object : HomeAssistantDiscovery.Listener {
             override fun onDiscovered(result: HomeAssistantDiscovery.Discovered) {
+                Log.i(TAG, "pair: discovered HA at ${result.baseUrl}")
                 mainHandler.post {
                     setStatus("Found HA at ${result.baseUrl}. Enter $code in Home Assistant.")
                 }
@@ -236,6 +239,7 @@ class MainActivity : Activity() {
             }
 
             override fun onError(message: String) {
+                Log.w(TAG, "pair: discovery error: $message")
                 mainHandler.post { setStatus("Discovery error: $message") }
             }
         })
@@ -244,16 +248,24 @@ class MainActivity : Activity() {
     private fun submitClaim(baseUrl: String, code: String, identity: AgentIdentity) {
         if (!pairingInFlight) return
         pairingExecutor.execute {
+            Log.i(TAG, "pair: POST ${baseUrl.trimEnd('/')}/api/hassglass/pair code=$code")
             val client = PairingClient(OkHttpPairingTransport(), settingsStore)
+            val startedAt = System.currentTimeMillis()
             val result = runCatching { client.claim(baseUrl, code, identity) }
+            val elapsed = System.currentTimeMillis() - startedAt
             mainHandler.post {
-                if (!pairingInFlight || pendingCode != code) return@post
+                if (!pairingInFlight || pendingCode != code) {
+                    Log.i(TAG, "pair: result ignored (no longer in-flight or code rotated)")
+                    return@post
+                }
                 pairingInFlight = false
                 stopPairing()
                 result.onSuccess {
+                    Log.i(TAG, "pair: success after ${elapsed}ms device_id=${it.deviceId}")
                     setStatus("Paired with ${it.haBaseUrl}.")
                     renderState()
                 }.onFailure { error ->
+                    Log.w(TAG, "pair: failed after ${elapsed}ms", error)
                     setStatus("Pairing failed: ${error.message ?: error.javaClass.simpleName}")
                     renderState()
                 }
@@ -307,6 +319,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val TAG = "HassGlass"
         private const val REQUEST_MIC = 1001
         private const val KEY_DEVICE_ID = "device_uuid"
         private const val AGENT_VERSION = "0.1.0"
