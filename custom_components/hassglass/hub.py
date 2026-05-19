@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
@@ -19,8 +20,6 @@ from .const import (
     SIGNAL_DEVICE_UPDATED,
 )
 from .device import DeviceBus, DeviceRecord, GlassesRuntime
-
-from homeassistant.core import HomeAssistant
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry

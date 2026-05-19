@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import logging
 from http import HTTPStatus
+from typing import Tuple
 
 import voluptuous as vol
 from aiohttp import web
@@ -54,7 +55,9 @@ _SCHEMA = vol.Schema(
         vol.Required("serial"): vol.All(str, vol.Length(min=1, max=128)),
         vol.Required("firmware"): vol.All(str, vol.Length(min=1, max=64)),
         vol.Required("agent_version"): vol.All(str, vol.Length(min=1, max=64)),
-        vol.Optional("name", default="Rokid Glasses"): vol.All(str, vol.Length(min=1, max=128)),
+        vol.Optional("name", default="Rokid Glasses"): vol.All(
+            str, vol.Length(min=1, max=128)
+        ),
     },
 )
 
@@ -74,20 +77,30 @@ class HassGlassPairingView(HomeAssistantView):
     def _get_runtime(self):  # type: ignore[return]
         entries = self.hass.config_entries.async_entries(DOMAIN)
         entry = next(
-            (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
+            (
+                e
+                for e in entries
+                if e.unique_id == DOMAIN and hasattr(e, "runtime_data")
+            ),
             None,
         )
         return entry.runtime_data if entry is not None else None
 
     async def post(self, request: web.Request) -> web.Response:
+        error: Tuple[str, HTTPStatus] | None = None
+        payload = None
         try:
             payload = await request.json()
         except ValueError:
-            return self.json_message("invalid JSON", HTTPStatus.BAD_REQUEST)
-        try:
-            validated = _SCHEMA(payload)
-        except vol.Invalid as exc:
-            return self.json_message(f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
+            error = ("invalid JSON", HTTPStatus.BAD_REQUEST)
+        if error is not None and payload is not None:
+            try:
+                validated = _SCHEMA(payload)
+            except vol.Invalid as exc:
+                error = (f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
+
+        if error is not None:
+            return self.json_message(error[0], error[1])
 
         runtime = self._get_runtime()
         if runtime is None:
