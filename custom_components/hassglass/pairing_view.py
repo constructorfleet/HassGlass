@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import logging
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 import voluptuous as vol
 from aiohttp import web
@@ -39,6 +40,9 @@ from homeassistant.helpers.http import HomeAssistantView
 from .const import DOMAIN
 from .device import DeviceRecord
 from .pairing import PairingError
+
+if TYPE_CHECKING:
+    from . import HassGlassRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,8 +75,8 @@ class HassGlassPairingView(HomeAssistantView):
     name = "api:hassglass:pair"
     requires_auth = False  # unauthenticated by design — the code IS the auth
 
-    def _get_runtime(self):  # type: ignore[return]
-        entries = self.hass.config_entries.async_entries(DOMAIN)
+    def _get_runtime(self) -> HassGlassRuntimeData | None:
+        entries = self.hass.config_entries.async_entries(DOMAIN)  # type: ignore[attr-defined]
         entry = next(
             (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
             None,
@@ -80,20 +84,14 @@ class HassGlassPairingView(HomeAssistantView):
         return entry.runtime_data if entry is not None else None
 
     async def post(self, request: web.Request) -> web.Response:
-        error: tuple[str, HTTPStatus] | None = None
-        payload = None
         try:
             payload = await request.json()
         except ValueError:
-            error = ("invalid JSON", HTTPStatus.BAD_REQUEST)
-        if error is not None and payload is not None:
-            try:
-                validated = _SCHEMA(payload)
-            except vol.Invalid as exc:
-                error = (f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
-
-        if error is not None:
-            return self.json_message(error[0], error[1])
+            return self.json_message("invalid JSON", HTTPStatus.BAD_REQUEST)
+        try:
+            validated = _SCHEMA(payload)
+        except vol.Invalid as exc:
+            return self.json_message(f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
 
         runtime = self._get_runtime()
         if runtime is None:

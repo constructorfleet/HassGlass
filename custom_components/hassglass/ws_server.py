@@ -39,6 +39,7 @@ from .protocol import (
 )
 
 if TYPE_CHECKING:
+    from . import HassGlassRuntimeData
     from .hub import HassGlassHub
     from .pipeline_bridge import PipelineBridge
 
@@ -59,8 +60,8 @@ class HassGlassWsView(HomeAssistantView):
     name = "api:hassglass:ws"
     requires_auth = False  # we use our own per-device tokens
 
-    def _get_runtime(self):  # type: ignore[return]
-        entries = self.hass.config_entries.async_entries(DOMAIN)
+    def _get_runtime(self) -> HassGlassRuntimeData | None:
+        entries = self.hass.config_entries.async_entries(DOMAIN)  # type: ignore[attr-defined]
         entry = next(
             (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
             None,
