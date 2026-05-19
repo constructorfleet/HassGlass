@@ -23,6 +23,7 @@ from custom_components.hassglass.const import (
     CONF_DEFAULT_TTL_MS,
     CONF_PIPELINE_ID,
     CONF_WAKE_WORD_ENABLED,
+    DEFAULT_TTL_MS,
     DOMAIN,
 )
 from custom_components.hassglass.device import DeviceRecord
@@ -129,14 +130,18 @@ async def test_options_flow_round_trips(hass: HomeAssistant) -> None:
     assert entry.options[CONF_PIPELINE_ID] == "preferred"
 
 
-async def test_zeroconf_aborts_when_hub_not_configured(hass: HomeAssistant) -> None:
+async def test_zeroconf_creates_hub_when_none_exists(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_ZEROCONF},
         data=_discovery_info(),
     )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "hub_not_configured"
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "HassGlass"
+    entry = result["result"]
+    assert entry.unique_id == DOMAIN
+    assert entry.options[CONF_WAKE_WORD_ENABLED] is True
+    assert entry.options[CONF_DEFAULT_TTL_MS] == DEFAULT_TTL_MS
 
 
 async def test_zeroconf_confirm_completes_pairing(hass: HomeAssistant) -> None:

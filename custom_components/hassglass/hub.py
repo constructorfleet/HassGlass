@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
@@ -22,12 +23,17 @@ from .device import DeviceBus, DeviceRecord, GlassesRuntime
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
 _STORE_VERSION = 1
 _STORE_KEY = f"{DOMAIN}.devices"
+
+
+async def async_clear_device_store(hass: HomeAssistant) -> None:
+    """Erase the persisted device store. Called when the hub entry is removed."""
+    store: Store[dict[str, dict[str, Any]]] = Store(hass, _STORE_VERSION, _STORE_KEY)
+    await store.async_remove()
 
 
 class HassGlassHub:

@@ -66,10 +66,12 @@ class HassGlassConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Surface a discovered glasses device awaiting pairing confirmation.
 
-        The agent advertises `_hassglass._tcp.local.` with TXT records carrying
-        its identity. The hub must already be set up (the user runs the
-        integration's user flow once); pairing additional devices afterwards
-        is handled by this discovery → confirm step.
+        If no hub entry exists yet, one is created automatically with default
+        options so the user doesn't have to run the user flow first.  The
+        glasses will re-advertise once the hub HTTP endpoint is up.
+
+        If the hub exists but runtime_data isn't set yet (HA still starting up)
+        we abort; the glasses will retry.
         """
         properties = discovery_info.properties or {}
         device_id = _str_property(properties, "device_id") or _str_property(properties, "id")
@@ -81,8 +83,23 @@ class HassGlassConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         existing_entries = self._async_current_entries(include_ignore=False)
-        hub_entry = next((entry for entry in existing_entries if entry.domain == DOMAIN), None)
-        if hub_entry is None or not hasattr(hub_entry, "runtime_data"):
+        hub_entry = next(
+            (e for e in existing_entries if e.unique_id == DOMAIN),
+            None,
+        )
+
+        if hub_entry is None:
+            # No hub yet — create one with defaults. The glasses will
+            # re-advertise once the hub HTTP endpoint is available.
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(
+                title="HassGlass",
+                data={"devices": {}},
+                options=_default_options(),
+            )
+
+        if not hasattr(hub_entry, "runtime_data"):
             return self.async_abort(reason="hub_not_configured")
 
         self._pending_device_id = device_id
@@ -102,9 +119,9 @@ class HassGlassConfigFlow(ConfigFlow, domain=DOMAIN):
             code = str(user_input[CONF_CODE]).strip()
             hub_entry = next(
                 (
-                    entry
-                    for entry in self._async_current_entries(include_ignore=False)
-                    if entry.domain == DOMAIN
+                    e
+                    for e in self._async_current_entries(include_ignore=False)
+                    if e.unique_id == DOMAIN
                 ),
                 None,
             )
@@ -176,6 +193,15 @@ def _user_schema(defaults: Mapping[str, Any] | None = None) -> vol.Schema:
             ): str,
         },
     )
+
+
+def _default_options() -> dict[str, Any]:
+    return {
+        CONF_PIPELINE_ID: "",
+        CONF_WAKE_WORD_ENABLED: True,
+        CONF_DEFAULT_TTL_MS: DEFAULT_TTL_MS,
+        CONF_FALLBACK_MEDIA_PLAYER: "",
+    }
 
 
 def _str_property(properties: Mapping[str, Any], key: str) -> str | None:

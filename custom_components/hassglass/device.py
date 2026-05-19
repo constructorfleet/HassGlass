@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from aiohttp.web import WebSocketResponse
 
 _LOGGER = logging.getLogger(__name__)
+# aiohttp raises RuntimeError for closed sockets; OSError covers ConnectionResetError
+_WS_SEND_ERRORS = (ConnectionResetError, RuntimeError)
 
 
 @dataclass(slots=True)
@@ -116,7 +118,7 @@ class GlassesRuntime:
             return
         try:
             await self.ws.send_str(encode_message(msg_type, **fields))
-        except ConnectionResetError, RuntimeError:
+        except _WS_SEND_ERRORS:
             _LOGGER.warning("send_message failed for %s", self.record.device_id)
             self.connected = False
 
@@ -128,7 +130,7 @@ class GlassesRuntime:
         self.audio_out_seq = (self.audio_out_seq + 1) & 0xFFFFFFFF
         try:
             await self.ws.send_bytes(encode_audio_frame(channel, seq, payload))
-        except ConnectionResetError, RuntimeError:
+        except _WS_SEND_ERRORS:
             self.connected = False
 
 

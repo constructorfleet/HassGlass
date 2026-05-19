@@ -20,6 +20,7 @@ from homeassistant.helpers.http import HomeAssistantView
 from .audio import run_assist_pipeline
 from .auth import find_device_by_token
 from .const import (
+    DOMAIN,
     EVENT_BUTTON,
     EVENT_GESTURE,
     SIGNAL_DEVICE_UPDATED,
@@ -38,8 +39,7 @@ from .protocol import (
 )
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
-
+    from . import HassGlassRuntimeData
     from .hub import HassGlassHub
     from .pipeline_bridge import PipelineBridge
 
@@ -50,43 +50,56 @@ _HELLO_TIMEOUT_S = 5.0
 
 
 class HassGlassWsView(HomeAssistantView):
-    """aiohttp view that upgrades to a WebSocket for a paired device."""
+    """aiohttp view that upgrades to a WebSocket for a paired device.
+
+    Stateless: looks up hub and bridge on every new connection via self.hass
+    so it stays correct across entry reloads and hub delete-then-recreate.
+    """
 
     url = WS_URL_PATH
     name = "api:hassglass:ws"
     requires_auth = False  # we use our own per-device tokens
 
-    def __init__(self, hass: HomeAssistant, hub: HassGlassHub, bridge: PipelineBridge) -> None:
-        self.hass = hass
-        self.hub = hub
-        self.bridge = bridge
+    def _get_runtime(self) -> HassGlassRuntimeData | None:
+        entries = self.hass.config_entries.async_entries(DOMAIN)  # type: ignore[attr-defined]
+        entry = next(
+            (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
+            None,
+        )
+        return entry.runtime_data if entry is not None else None
 
     async def get(self, request: web.Request) -> web.StreamResponse:
+        runtime = self._get_runtime()
+        if runtime is None:
+            return web.Response(status=HTTPStatus.SERVICE_UNAVAILABLE, text="hub not set up")
+        hub: HassGlassHub = runtime.hub
+        bridge: PipelineBridge = runtime.bridge
+
         token = _extract_bearer_token(request)
         if token is None:
             return web.Response(status=HTTPStatus.UNAUTHORIZED, text="missing bearer token")
-        device_id = find_device_by_token(token, self.hub.devices)
+        device_id = find_device_by_token(token, hub.devices)
         if device_id is None:
             return web.Response(status=HTTPStatus.UNAUTHORIZED, text="unknown token")
-        record = self.hub.get_device(device_id)
+        record = hub.get_device(device_id)
         assert record is not None  # guarded by find_device_by_token
 
         ws = web.WebSocketResponse(heartbeat=_HEARTBEAT_S, autoping=True)
         await ws.prepare(request)
 
-        runtime = GlassesRuntime(record=record, ws=ws)
+        glass_runtime = GlassesRuntime(record=record, ws=ws)
         # Drop any previous session for this device — the new one wins.
-        await self.hub.detach_runtime(device_id)
-        self.hub.attach_runtime(runtime)
+        await hub.detach_runtime(device_id)
+        hub.attach_runtime(glass_runtime)
         _LOGGER.info("Glass Agent connected: device_id=%s", device_id)
 
         try:
-            await _await_hello(runtime)
-            await _reader_loop(self.hub, self.bridge, runtime)
+            await _await_hello(glass_runtime)
+            await _reader_loop(hub, bridge, glass_runtime)
         except _HelloError as exc:
             _LOGGER.warning("hello handshake failed for %s: %s", device_id, exc)
         finally:
-            await self.hub.detach_runtime(device_id)
+            await hub.detach_runtime(device_id)
             _LOGGER.info("Glass Agent disconnected: device_id=%s", device_id)
         return ws
 
