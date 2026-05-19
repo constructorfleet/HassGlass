@@ -14,6 +14,9 @@ import dev.hassglass.agent.settings.SharedPreferencesKeyValueStore
 import dev.hassglass.agent.ws.OkHttpWsTransport
 import dev.hassglass.agent.ws.TelemetrySnapshot
 import dev.hassglass.agent.ws.WsClient
+import dev.hassglass.agent.network.NetworkMonitor
+import dev.hassglass.agent.network.NetworkEvent
+import dev.hassglass.agent.network.NetworkObserver
 
 /**
  * Foreground service for the on-glasses agent runtime.
@@ -26,6 +29,7 @@ class HassGlassAgentService : Service() {
     private var runtime: AgentRuntime? = null
     private var controller: AgentController? = null
     private var worker: Thread? = null
+    private var networkMonitor: NetworkMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -47,13 +51,22 @@ class HassGlassAgentService : Service() {
             onConnected = runtime::attachConnection,
             onDisconnected = runtime::detachConnection,
         )
+
+        networkMonitor = NetworkMonitor(this, NetworkObserver { event ->
+            when (event) {
+                NetworkEvent.Lost, NetworkEvent.Available -> controller?.stop()
+            }
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         promoteToForeground()
-        worker = Thread {
-            controller?.start()
-        }.also { it.start() }
+        networkMonitor?.start()
+        if (worker?.isAlive != true) {
+            worker = Thread {
+                controller?.runUntilStopped()
+            }.also { it.start() }
+        }
         return START_STICKY
     }
 
@@ -69,7 +82,7 @@ class HassGlassAgentService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -95,6 +108,7 @@ class HassGlassAgentService : Service() {
         runtime?.shutdown()
         worker?.interrupt()
         worker = null
+        networkMonitor?.stop()
         super.onDestroy()
     }
 

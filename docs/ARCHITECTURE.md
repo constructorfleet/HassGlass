@@ -11,9 +11,9 @@ This document describes the end-to-end design of HassGlass: how a pair of Rokid 
 │ Rokid Glasses (YodaOS / Android)        │        │ Home Assistant                           │
 │                                         │        │                                          │
 │  ┌────────────────────────────────────┐ │        │  ┌────────────────────────────────────┐  │
-│  │ HassGlass Glass Agent (CXR-L app)  │ │        │  │ custom_components/hassglass        │  │
-│  │  • mic capture (AEC)               │ │  WSS   │  │  • device registry / config_flow   │  │
-│  │  • HUD renderer (Caps cards)       │◄┼────────┼─►│  • Wyoming-compatible audio bridge │  │
+│  │ HassGlass Glass Agent              │ │        │  │ custom_components/hassglass        │  │
+│  │  • direct LAN WebSocket client     │ │  WSS   │  │  • device registry / config_flow   │  │
+│  │  • HUD renderer / activity fallback│◄┼────────┼─►│  • Wyoming-compatible audio bridge │  │
 │  │  • IMU + touchpad + button events  │ │ JSON+  │  │  • HUD card dispatcher             │  │
 │  │  • TTS audio playback              │ │ binary │  │  • services, entities, events      │  │
 │  └────────────────────────────────────┘ │ frames │  └─────────────┬──────────────────────┘  │
@@ -23,19 +23,19 @@ This document describes the end-to-end design of HassGlass: how a pair of Rokid 
                                                     │     (STT → conversation → TTS)           │
                                                     └──────────────────────────────────────────┘
 
-         (optional, for first-time pairing or off-LAN use)
+         (optional future path, for first-time pairing or off-LAN use)
 ┌──────────────────────────────────────┐
 │ HassGlass Companion (iOS, CXR-M)     │  BLE GATT / Wi-Fi Direct
 │  • initial Wi-Fi onboarding          │◄────────────────────► Glasses
-│  • BLE relay when off home Wi-Fi     │
+│  • possible BLE relay when off Wi-Fi │
 └──────────────────────────────────────┘
 ```
 
 There are three software components in the system:
 
-1. **Glass Agent** — an on-glasses Android app built against the Rokid **CXR-L** SDK. It captures mic audio, renders HUD cards, surfaces hardware events, and plays back TTS. It is the only component that runs on the glasses.
+1. **Glass Agent** — an on-glasses Android/YodaOS app. It connects directly to Home Assistant over the home LAN WebSocket, captures mic audio, renders HUD cards, surfaces hardware events, and plays back TTS. It is the primary v1 runtime on the glasses.
 2. **HA Integration (`custom_components/hassglass`)** — the HACS-installable Python package. It owns device discovery, config flow, entity creation, the WebSocket server endpoint that the Glass Agent connects to, and the bridge into `assist_pipeline`.
-3. **Companion App** (optional) — an iOS app built against **CXR-M**. Needed only for first-time Wi-Fi onboarding of the glasses and as a BLE-relay fallback when the glasses are away from the home Wi-Fi. (Android companion is a post-1.0 candidate.)
+3. **Companion App** (optional future/fallback path) — an iOS app built against **CXR-M**. If the companion path ships, it would cover first-time Wi-Fi onboarding of the glasses and a BLE-relay fallback when the glasses are away from the home Wi-Fi. (Android companion is a post-1.0 candidate.)
 
 The glasses and HA communicate **directly over the home LAN** via a single multiplexed WebSocket. No Rokid cloud, no Anthropic / OpenAI cloud unless the user's Assist pipeline already uses one.
 
@@ -43,29 +43,30 @@ The glasses and HA communicate **directly over the home LAN** via a single multi
 
 ## 2. Rokid transport layer
 
-### 2.1 SDK choice
+### 2.1 Runtime choice
 
-| Rokid SDK | Where it runs | Role in HassGlass |
-|---|---|---|
-| **CXR-L** | On the glasses (YodaOS) | **Primary.** Glass Agent app binds to YodaOS AI service via AIDL and replaces the default assistant on the wake-word path. |
-| **CXR-M** | iOS phone (v1); Android (post-1.0) | **Optional companion.** Used only for BLE pairing, Wi-Fi onboarding, and as a relay when off-LAN. |
-| **CXR-S** | On the glasses | Not used in v1 — covered by CXR-L. |
+| SDK | Where it runs | HassGlass use |
+| --- | --- | --- |
+| **Direct Android/YodaOS app** | On the glasses | **Primary v1 path.** The agent is a sideloaded Android app that connects directly to Home Assistant over the home LAN via WebSocket. |
+| **CXR-L** | On the glasses | Future native adapter for Rokid AI service, wake-word, AEC microphone, and display integration. |
+| **CXR-M** | Phone companion | Optional future relay/onboarding path when the glasses are away from home Wi-Fi. |
+| **CXR-S** | On the glasses | Not used for direct Wi-Fi. CXR-S is a bridge to CXR-M/mobile using `CXRServiceBridge`, `Caps`, and mobile message channels. |
 
-Choosing CXR-L as primary means the glasses are a **first-class network citizen**: once on Wi-Fi they reach HA directly and the companion app is no longer in the critical path.
+For direct Wi-Fi, the Android/YodaOS app is the first-class network client. Once the glasses are on Wi-Fi they talk to Home Assistant themselves, and no CXR-S bridge belongs in the critical path.
 
 ### 2.2 Wire protocol — `hassglass/1` over WebSocket
 
 The Glass Agent opens a single TLS-terminated WebSocket to the HA integration:
 
 ```
-wss://homeassistant.local:8123/api/hassglass/ws
+wss://homeassistant.local:8123/api/hassglass/ws/v1
 ```
 
 Authentication uses a long-lived access token issued during pairing, sent as `Authorization: Bearer …` on the upgrade request — same model HA uses for its native WS API.
 
 The connection is **bidirectional and multiplexed**. Frames are either:
 
-- **Binary frames**: 16 kHz mono PCM (or Opus, negotiated) audio chunks, prefixed with a 4-byte little-endian channel id and a 4-byte sequence number. Channels: `0x01` mic-up, `0x02` tts-down.
+- **Binary frames**: audio chunks prefixed with a 4-byte little-endian channel id and a 4-byte sequence number. Today, `0x01` mic-up carries 16 kHz mono PCM from the agent's mic source, and `0x02` tts-down carries the HA TTS bytes the integration fetched. Future protocol work may add explicit codec negotiation (for example Opus or guaranteed raw PCM on tts-down).
 - **Text frames**: JSON envelopes, one message per frame:
 
 ```json
@@ -89,15 +90,15 @@ Message types (initial set):
 
 The protocol is versioned by the URL path (`/api/hassglass/ws/v1`) and by a `protocol_version` field in `hello`. Breaking changes bump both.
 
-### 2.3 Fallback: BLE-bridged mode
+### 2.3 Fallback: BLE-bridged mode (future)
 
-When the glasses are off Wi-Fi (e.g. user walked outside), the Companion app on the user's phone can act as a relay:
+If the companion path is built, it could relay limited traffic when the glasses are off Wi-Fi (for example, when the user walks outside):
 
 ```
 Glasses ── BLE GATT ──► Companion App ── HTTPS/WSS ──► Home Assistant
 ```
 
-Only the **control plane** (HUD updates, simple notifications, intent commands) is relayed in this mode; live audio capture is too bandwidth-heavy for BLE. The integration advertises capabilities per session in `hello` so the HA side knows whether to enable wake-word audio streaming.
+Only the **control plane** (HUD updates, simple notifications, intent commands) would be relayed in this mode; live audio capture is too bandwidth-heavy for BLE. The integration would advertise capabilities per session in `hello` so the HA side knows whether to enable wake-word audio streaming.
 
 ---
 
@@ -108,16 +109,17 @@ HassGlass does **not** invent a new pipeline. It plugs the glasses' mic + speake
 ### 3.1 Audio capture → STT
 
 ```
-Glass mic → AEC (NXP RT600) → 16 kHz PCM → WS binary frame ch=0x01
-                                              │
-                                              ▼
-                       custom_components/hassglass/audio.py
-                                              │ (async generator of bytes)
-                                              ▼
-       assist_pipeline.async_pipeline_from_audio_stream(
-           hass, context, event_callback,
-           stt_metadata=..., stt_stream=audio_gen,
-           pipeline_id=device_pipeline_id, ...)
+Glass mic → AndroidMicSource today (CxrlMicSource later) → 16 kHz PCM
+                                                        → WS binary frame ch=0x01
+                                                          │
+                                                          ▼
+                                   custom_components/hassglass/audio.py
+                                                          │ (async generator of bytes)
+                                                          ▼
+                   assist_pipeline.async_pipeline_from_audio_stream(
+                       hass, context, event_callback,
+                       stt_metadata=..., stt_stream=audio_gen,
+                       pipeline_id=device_pipeline_id, ...)
 ```
 
 Each glasses device has an associated `pipeline_id` (configurable per device, defaults to the user's preferred Assist pipeline). This is the same selector pattern View Assist uses for per-satellite pipeline overrides.
@@ -138,7 +140,7 @@ The Glass Agent owns the visual treatment of these states; the integration sends
 
 ### 3.3 TTS → speaker
 
-When the pipeline emits a `tts-end` event with a media URL, the integration fetches the audio server-side, transcodes to 16 kHz Opus (or PCM, per `hello.capabilities`), chunks it, and pushes it to the glasses on channel `0x02`. The Glass Agent plays it through the YodaOS audio HAL.
+When the pipeline emits a `tts-end` event with a media URL, the integration currently fetches the audio server-side and chunks the returned bytes onto channel `0x02` without a codec-negotiation step. On the Android playback path, the sink is PCM-oriented and strips a WAV header when HA returns WAV-wrapped PCM. Explicit transcoding or negotiated Opus output is future work, not the current wire contract.
 
 ### 3.4 Wake word
 
@@ -183,7 +185,7 @@ Cards have integer priority (0–100). An `alert` with priority 90 will preempt 
 Three trigger sources:
 
 1. **Automatic from pipeline reply.** When `tts-end` fires and the conversation response has structured data (e.g. weather skill), the integration auto-selects a card kind. Mapping is defined in `card_mapping.py` and is user-overridable via a `hassglass.card_map` blueprint.
-2. **Explicit service call.** Any automation can call `hassglass.notify` with a target device and a card spec.
+2. **Explicit service call.** Any automation can call `hassglass.notify` with one target device and a card spec.
 3. **Native HA notifier.** The integration registers itself as a `notify.<device>` platform so existing `notify.send_message` calls land on the HUD.
 
 ---
@@ -192,7 +194,7 @@ Three trigger sources:
 
 `custom_components/hassglass/` follows the standard Home Assistant integration layout. See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the full file list; below is the runtime view.
 
-### 5.1 Entities created per glasses device
+### 5.1 Platforms and entities exposed today
 
 | Platform | Entity | Notes |
 |---|---|---|
@@ -202,25 +204,38 @@ Three trigger sources:
 | `sensor` | `sensor.<glasses>_current_card` | Card id currently on HUD |
 | `binary_sensor` | `binary_sensor.<glasses>_worn` | Derived from IMU stillness + proximity |
 | `binary_sensor` | `binary_sensor.<glasses>_listening` | True between `stt-start` and `stt-end` |
+| `binary_sensor` | `binary_sensor.<glasses>_connected` | True while the Glass Agent WebSocket is connected |
+| `button` | `button.<glasses>_dismiss_card` | Pop top HUD card |
+| `button` | `button.<glasses>_identify` | Show a short identify toast on that device |
 | `select` | `select.<glasses>_pipeline` | Per-device Assist pipeline override |
 | `switch` | `switch.<glasses>_wake_word` | Enable/disable on-glass wake word |
-| `button` | `button.<glasses>_dismiss_card` | Pop top HUD card |
+| `switch` | `switch.<glasses>_listening_enabled` | Integration-side mic privacy cut-off |
 | `event` | `event.<glasses>_gesture` | Fires on swipe / tap / long-press |
 | `event` | `event.<glasses>_button` | Side-button press events |
 | `media_player` | `media_player.<glasses>` | TTS / announce target |
+| `notify` | `notify.<glasses>` | `NotifyEntity` target for HUD cards |
 
-### 5.2 Services exposed
+The current implementation exposes eight HA platforms per paired device: `sensor`, `binary_sensor`, `button`, `select`, `switch`, `media_player`, `event`, and `notify`.
+
+### 5.2 Services exposed today
 
 | Service | Purpose |
 |---|---|
-| `hassglass.notify` | Push a card to one or more glasses. Mirrors View Assist's `broadcast_event`. |
+| `hassglass.notify` | Push a card to one glasses device. |
 | `hassglass.dismiss` | Dismiss a card (by id or `*`). |
-| `hassglass.set_pipeline` | Switch the active Assist pipeline for a device. |
-| `hassglass.set_state` | Update arbitrary device-scoped state (analog to View Assist's `view_assist.set_state`). |
-| `hassglass.start_listening` | Programmatically start a mic capture (e.g. from an automation). |
 | `hassglass.identify` | Flash the HUD so the user knows which physical pair is selected. |
 
-### 5.3 Events emitted
+### 5.3 Planned service additions / follow-ups
+
+These show up in earlier design notes and may still be sensible later, but they are **not** currently exposed by the integration:
+
+| Service | Intended purpose |
+|---|---|
+| `hassglass.set_pipeline` | Switch the active Assist pipeline for a device through a service call instead of the existing `select` entity. |
+| `hassglass.set_state` | Update arbitrary device-scoped state if the project grows a richer state model. |
+| `hassglass.start_listening` | Programmatically trigger a mic capture from an automation. |
+
+### 5.4 Events emitted
 
 | Event | When |
 |---|---|

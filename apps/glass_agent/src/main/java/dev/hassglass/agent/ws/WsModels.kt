@@ -33,6 +33,7 @@ interface WsConnection {
     fun sendText(text: String)
     fun sendBytes(bytes: ByteArray)
     fun close()
+    fun awaitClose() = Unit
 }
 
 interface WsListener {

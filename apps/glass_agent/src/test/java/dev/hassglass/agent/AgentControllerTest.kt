@@ -80,14 +80,92 @@ class AgentControllerTest {
         assertTrue(disconnected)
         assertTrue(connector.connection.closed)
     }
+
+    @Test
+    fun runUntilStoppedReconnectsAfterConnectionCloses() {
+        val settingsStore = AgentSettingsStore(InMemoryKeyValueStore())
+        settingsStore.savePairedSettings(
+                PairedAgentSettings(
+                        haBaseUrl = "https://ha.example",
+                        deviceId = "rokid-1",
+                        serial = "SN123",
+                        firmware = "1.2.3",
+                        agentVersion = "0.1.0",
+                        token = "device-token",
+                ),
+        )
+        val connector = RecordingConnector()
+        lateinit var controller: AgentController
+        var disconnects = 0
+        controller =
+                AgentController(
+                        settingsStore = settingsStore,
+                        connector = connector,
+                        sleeper = {},
+                        onDisconnected = {
+                            disconnects += 1
+                            if (disconnects == 2) {
+                                controller.stop()
+                            }
+                        },
+                )
+
+        assertEquals(AgentStartResult.CONNECTED, controller.runUntilStopped())
+
+        assertEquals(2, connector.configs.size)
+        assertEquals(2, disconnects)
+    }
+
+    @Test
+    fun runUntilStoppedKeepsTryingAfterConnectRetryBudgetFails() {
+        val settingsStore = AgentSettingsStore(InMemoryKeyValueStore())
+        settingsStore.savePairedSettings(
+                PairedAgentSettings(
+                        haBaseUrl = "https://ha.example",
+                        deviceId = "rokid-1",
+                        serial = "SN123",
+                        firmware = "1.2.3",
+                        agentVersion = "0.1.0",
+                        token = "device-token",
+                ),
+        )
+        val connector = RecordingConnector(failuresBeforeSuccess = 1)
+        lateinit var controller: AgentController
+        controller =
+                AgentController(
+                        settingsStore = settingsStore,
+                        connector = connector,
+                        sleeper = {},
+                        onDisconnected = { controller.stop() },
+                )
+
+        assertEquals(AgentStartResult.CONNECTED, controller.runUntilStopped())
+
+        assertEquals(2, connector.configs.size)
+    }
 }
 
 private class RecordingConnector : AgentConnector {
+    constructor()
+
+    constructor(failuresBeforeSuccess: Int) {
+        this.failuresBeforeSuccess = failuresBeforeSuccess
+    }
+
+    private var failuresBeforeSuccess = 0
     val configs = mutableListOf<AgentConnectionConfig>()
-    val connection = RecordingWsConnection()
+    val connections = mutableListOf<RecordingWsConnection>()
+    val connection: RecordingWsConnection
+        get() = connections.last()
 
     override fun connectWithRetry(config: AgentConnectionConfig, maxAttempts: Int): WsConnection {
         configs += config
+        if (failuresBeforeSuccess > 0) {
+            failuresBeforeSuccess -= 1
+            throw RuntimeException("connect failed")
+        }
+        val connection = RecordingWsConnection()
+        connections += connection
         return connection
     }
 }
@@ -100,6 +178,10 @@ private class RecordingWsConnection : WsConnection {
     override fun sendBytes(bytes: ByteArray) = Unit
 
     override fun close() {
+        closed = true
+    }
+
+    override fun awaitClose() {
         closed = true
     }
 }
