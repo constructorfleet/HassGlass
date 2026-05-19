@@ -1,6 +1,8 @@
-"""Tests for the pairing broker."""
+"""Tests for the agent-initiated pairing broker."""
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 
@@ -23,6 +25,21 @@ def _make_record(token: str) -> DeviceRecord:
     )
 
 
+def _claim(
+    broker: PairingBroker,
+    code: str = "123456",
+    *,
+    device_id: str = "rokid-1",
+    name: str = "Test glasses",
+) -> None:
+    broker.claim(
+        code,
+        device_id=device_id,
+        name=name,
+        record_factory=_make_record,
+    )
+
+
 def test_generate_pairing_code_is_six_digits() -> None:
     for _ in range(50):
         code = generate_pairing_code()
@@ -30,50 +47,106 @@ def test_generate_pairing_code_is_six_digits() -> None:
         assert code.isdigit()
 
 
-def test_complete_succeeds_with_matching_code() -> None:
+def test_confirm_returns_record_for_matching_claim() -> None:
     broker = PairingBroker()
-    pending = broker.begin()
-    record = broker.complete(pending.code, record_factory=_make_record)
+    _claim(broker, "123456")
+    record = broker.confirm("123456")
     assert record.device_id == "rokid-1"
     assert record.token  # non-empty
-    # `completed` future is lazy — only created when someone awaits.
-    assert pending.completed is None
 
 
-async def test_completed_future_resolves_for_async_waiter() -> None:
+async def test_confirm_resolves_parked_future() -> None:
     broker = PairingBroker()
-    pending = broker.begin()
+    pending = broker.claim(
+        "123456",
+        device_id="rokid-1",
+        name="Test glasses",
+        record_factory=_make_record,
+    )
     future = pending.ensure_future()
-    record = broker.complete(pending.code, record_factory=_make_record)
+    record = broker.confirm("123456")
     assert future.done()
     assert future.result() is record
 
 
-def test_complete_with_unknown_code_raises() -> None:
+def test_confirm_with_unknown_code_raises() -> None:
     broker = PairingBroker()
     with pytest.raises(PairingError, match="unknown"):
-        broker.complete("000000", record_factory=_make_record)
+        broker.confirm("000000")
 
 
-def test_expired_code_rejected() -> None:
+def test_expired_claim_rejected() -> None:
     broker = PairingBroker(code_ttl_s=0.0)
-    pending = broker.begin()
+    _claim(broker, "123456")
     with pytest.raises(PairingError, match="unknown or expired"):
-        broker.complete(pending.code, record_factory=_make_record)
+        broker.confirm("123456")
+
+
+async def test_expired_claim_cancels_parked_future() -> None:
+    broker = PairingBroker(code_ttl_s=0.0)
+    pending = broker.claim(
+        "123456",
+        device_id="rokid-1",
+        name="Test glasses",
+        record_factory=_make_record,
+    )
+    future = pending.ensure_future()
+    with pytest.raises(PairingError, match="unknown or expired"):
+        broker.confirm("123456")
+    assert future.done()
+    with pytest.raises(PairingError, match="timed out"):
+        future.result()
 
 
 def test_lockout_after_repeated_failures() -> None:
     broker = PairingBroker()
     for _ in range(5):
         with pytest.raises(PairingError):
-            broker.complete("000000", record_factory=_make_record)
+            broker.confirm("000000")
     with pytest.raises(PairingError, match="locked"):
-        broker.complete("000000", record_factory=_make_record)
+        broker.confirm("000000")
 
 
-def test_completing_consumes_pending() -> None:
+def test_confirming_consumes_claim() -> None:
     broker = PairingBroker()
-    pending = broker.begin()
-    broker.complete(pending.code, record_factory=_make_record)
+    _claim(broker, "123456")
+    broker.confirm("123456")
     with pytest.raises(PairingError, match="unknown"):
-        broker.complete(pending.code, record_factory=_make_record)
+        broker.confirm("123456")
+
+
+def test_replacement_claim_cancels_prior_future() -> None:
+    broker = PairingBroker()
+    pending_a = broker.claim(
+        "123456",
+        device_id="rokid-1",
+        name="Test glasses",
+        record_factory=_make_record,
+    )
+    # Whoever last claimed the code wins; the prior parked POST is cancelled.
+    async def _drive() -> None:
+        future = pending_a.ensure_future()
+        broker.claim(
+            "123456",
+            device_id="rokid-1",
+            name="Test glasses",
+            record_factory=_make_record,
+        )
+        assert future.cancelled()
+
+    asyncio.run(_drive())
+
+
+def test_list_pending_excludes_expired() -> None:
+    broker = PairingBroker(code_ttl_s=0.0)
+    _claim(broker, "111111", device_id="a", name="A")
+    pending = list(broker.list_pending())
+    assert pending == []
+
+
+def test_list_pending_returns_active_claims() -> None:
+    broker = PairingBroker()
+    _claim(broker, "111111", device_id="a", name="A")
+    _claim(broker, "222222", device_id="b", name="B")
+    codes = sorted(p.code for p in broker.list_pending())
+    assert codes == ["111111", "222222"]
