@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
@@ -66,8 +68,6 @@ class MainActivity : Activity() {
     private lateinit var codeView: TextView
     private lateinit var pairButton: Button
     private lateinit var cancelPairButton: Button
-    private lateinit var startButton: Button
-    private lateinit var stopButton: Button
     private lateinit var clearPairingButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +87,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (!pairingInFlight) renderState()
+        if (!pairingInFlight) {
+            renderState()
+            maybeStartAgent()
+        }
     }
 
     override fun onDestroy() {
@@ -103,9 +106,9 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_MIC && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            startAgentService()
+            maybeStartAgent()
         } else if (requestCode == REQUEST_MIC) {
-            setStatus("Microphone permission is required to start the agent.")
+            setStatus("Microphone permission is required for the agent.")
         }
     }
 
@@ -114,6 +117,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.BLACK)
+            // Any touch counts as a user input event in the system's view, which grants a brief
+            // window during which the app can start a foreground-microphone service from API 31+
+            // even though the device's launcher never gives our window focus. Wire the root to
+            // trigger a service start so the wearer can boot the agent with a single tap.
+            setOnTouchListener { _, _ -> maybeStartAgent(); false }
         }
 
         statusView = TextView(this).apply {
@@ -131,38 +139,48 @@ class MainActivity : Activity() {
         }
         root.addView(codeView, lp(MATCH_PARENT, bottom = 16))
 
-        pairButton = Button(this).apply {
-            text = "Pair with Home Assistant"
-            setOnClickListener { startPairing() }
-        }
-        root.addView(pairButton, lp(WRAP_CONTENT, bottom = 16))
+        pairButton = focusableButton("Pair with Home Assistant") { startPairing() }
+        root.addView(pairButton, lp(MATCH_PARENT, bottom = 16))
 
-        cancelPairButton = Button(this).apply {
-            text = "Cancel pairing"
-            setOnClickListener { stopPairing(); renderState() }
+        cancelPairButton = focusableButton("Cancel pairing") { stopPairing(); renderState() }.apply {
             visibility = View.GONE
         }
-        root.addView(cancelPairButton, lp(WRAP_CONTENT, bottom = 16))
+        root.addView(cancelPairButton, lp(MATCH_PARENT, bottom = 16))
 
-        startButton = Button(this).apply {
-            text = "Start agent"
-            setOnClickListener { onStartClicked() }
-        }
-        root.addView(startButton, lp(WRAP_CONTENT, bottom = 8))
-
-        stopButton = Button(this).apply {
-            text = "Stop agent"
-            setOnClickListener { onStopClicked() }
-        }
-        root.addView(stopButton, lp(WRAP_CONTENT, bottom = 8))
-
-        clearPairingButton = Button(this).apply {
-            text = "Clear pairing"
-            setOnClickListener { onClearPairingClicked() }
-        }
-        root.addView(clearPairingButton, lp(WRAP_CONTENT))
+        clearPairingButton = focusableButton("Clear pairing") { onClearPairingClicked() }
+        root.addView(clearPairingButton, lp(MATCH_PARENT))
 
         return root
+    }
+
+    private fun focusableButton(label: String, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            background = focusableBackground()
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setPadding(32, 24, 32, 24)
+            setOnClickListener { onClick() }
+        }
+
+    private fun focusableBackground(): StateListDrawable {
+        val focused = GradientDrawable().apply {
+            setColor(Color.parseColor("#003B42"))
+            setStroke(8, Color.parseColor("#00E5FF"))
+            cornerRadius = 14f
+        }
+        val normal = GradientDrawable().apply {
+            setColor(Color.parseColor("#0E2628"))
+            setStroke(2, Color.parseColor("#1F4044"))
+            cornerRadius = 14f
+        }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), focused)
+            addState(intArrayOf(android.R.attr.state_pressed), focused)
+            addState(intArrayOf(android.R.attr.state_selected), focused)
+            addState(intArrayOf(), normal)
+        }
     }
 
     private fun lp(width: Int = WRAP_CONTENT, bottom: Int = 0): LinearLayout.LayoutParams =
@@ -173,36 +191,45 @@ class MainActivity : Activity() {
     private fun renderState() {
         val paired = settingsStore.loadPairedSettings()
         val online = hasLocalNetwork()
+        val initialFocus: View
         if (paired == null) {
-            if (pairingInFlight) {
-                pairButton.visibility = View.GONE
-                cancelPairButton.visibility = View.VISIBLE
-                codeView.visibility = View.VISIBLE
-            } else if (!online) {
-                setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
-                codeView.visibility = View.GONE
-                pairButton.visibility = View.VISIBLE
-                pairButton.isEnabled = false
-                cancelPairButton.visibility = View.GONE
-            } else {
-                setStatus("Not paired. Tap Pair, then enter the code in Home Assistant.")
-                codeView.visibility = View.GONE
-                pairButton.visibility = View.VISIBLE
-                pairButton.isEnabled = true
-                cancelPairButton.visibility = View.GONE
-            }
-            startButton.visibility = View.GONE
-            stopButton.visibility = View.GONE
             clearPairingButton.visibility = View.GONE
+            when {
+                pairingInFlight -> {
+                    pairButton.visibility = View.GONE
+                    cancelPairButton.visibility = View.VISIBLE
+                    codeView.visibility = View.VISIBLE
+                    initialFocus = cancelPairButton
+                }
+                !online -> {
+                    setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
+                    codeView.visibility = View.GONE
+                    pairButton.visibility = View.VISIBLE
+                    pairButton.isEnabled = false
+                    cancelPairButton.visibility = View.GONE
+                    initialFocus = pairButton
+                }
+                else -> {
+                    setStatus("Not paired. Tap Pair, then enter the code in Home Assistant.")
+                    codeView.visibility = View.GONE
+                    pairButton.visibility = View.VISIBLE
+                    pairButton.isEnabled = true
+                    cancelPairButton.visibility = View.GONE
+                    initialFocus = pairButton
+                }
+            }
         } else {
-            setStatus("Paired with ${paired.haBaseUrl}.")
+            setStatus(
+                if (online) "Paired with ${paired.haBaseUrl}. Agent will run while Wi-Fi is up."
+                else "Paired. Waiting for Wi-Fi…",
+            )
             codeView.visibility = View.GONE
             pairButton.visibility = View.GONE
             cancelPairButton.visibility = View.GONE
-            startButton.visibility = View.VISIBLE
-            stopButton.visibility = View.VISIBLE
             clearPairingButton.visibility = View.VISIBLE
+            initialFocus = clearPairingButton
         }
+        initialFocus.post { initialFocus.requestFocus() }
     }
 
     private fun hasLocalNetwork(): Boolean {
@@ -231,11 +258,30 @@ class MainActivity : Activity() {
         advertiser.advertise(identity, code)
         discoveryHandle = discovery.discover(object : HomeAssistantDiscovery.Listener {
             override fun onDiscovered(result: HomeAssistantDiscovery.Discovered) {
-                Log.i(TAG, "pair: discovered HA at ${result.baseUrl}")
-                mainHandler.post {
-                    setStatus("Found HA at ${result.baseUrl}. Enter $code in Home Assistant.")
+                val baseUrl = result.baseUrl
+                if (baseUrl == null) {
+                    Log.w(
+                        TAG,
+                        "pair: HA at ${result.host}:${result.port} did not advertise an HTTPS " +
+                            "internal_url/base_url; refusing cleartext fallback",
+                    )
+                    mainHandler.post {
+                        if (!pairingInFlight || pendingCode != code) return@post
+                        pairingInFlight = false
+                        stopPairing()
+                        setStatus(
+                            "HA didn't advertise an HTTPS internal_url. Set internal_url in HA " +
+                                "configuration.yaml and retry.",
+                        )
+                        renderState()
+                    }
+                    return
                 }
-                submitClaim(result.baseUrl, code, identity)
+                Log.i(TAG, "pair: discovered HA at $baseUrl (from ${result.source})")
+                mainHandler.post {
+                    setStatus("Found HA. Enter $code in Home Assistant.")
+                }
+                submitClaim(baseUrl, code, identity)
             }
 
             override fun onError(message: String) {
@@ -264,6 +310,7 @@ class MainActivity : Activity() {
                     Log.i(TAG, "pair: success after ${elapsed}ms device_id=${it.deviceId}")
                     setStatus("Paired with ${it.haBaseUrl}.")
                     renderState()
+                    maybeStartAgent()
                 }.onFailure { error ->
                     Log.w(TAG, "pair: failed after ${elapsed}ms", error)
                     setStatus("Pairing failed: ${error.message ?: error.javaClass.simpleName}")
@@ -290,27 +337,26 @@ class MainActivity : Activity() {
         name = Build.MODEL ?: "HassGlass",
     )
 
-    private fun onStartClicked() {
+    /**
+     * Start the foreground agent service when we're paired and online. Prompts for the
+     * microphone permission once if it hasn't been granted — startForeground requires it
+     * to promote the service under FOREGROUND_SERVICE_TYPE_MICROPHONE.
+     */
+    private fun maybeStartAgent() {
+        if (pairingInFlight) return
+        if (settingsStore.loadPairedSettings() == null) return
+        if (!hasLocalNetwork()) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
             return
         }
-        startAgentService()
-    }
-
-    private fun startAgentService() {
-        val intent = Intent(this, HassGlassAgentService::class.java)
-        startForegroundService(intent)
-        setStatus("Agent service started.")
-    }
-
-    private fun onStopClicked() {
-        stopService(Intent(this, HassGlassAgentService::class.java))
-        setStatus("Agent service stopped.")
+        Log.i(TAG, "starting agent service (paired, online, mic permission granted)")
+        startForegroundService(Intent(this, HassGlassAgentService::class.java))
     }
 
     private fun onClearPairingClicked() {
         settingsStore.clearPairing()
+        stopService(Intent(this, HassGlassAgentService::class.java))
         renderState()
     }
 
