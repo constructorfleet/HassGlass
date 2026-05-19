@@ -3,17 +3,30 @@
     "step": {
       "user": {
         "title": "Set up HassGlass",
-        "description": "Choose defaults for all paired glasses. You can pair devices after setup from the integration's Devices page.",
+        "description": "Choose defaults for all paired glasses. Devices pair themselves once the hub is set up — just put on the glasses and follow the on-HUD prompt.",
         "data": {
           "pipeline_id": "Default Assist pipeline ID (blank = use HA preferred)",
           "wake_word_enabled": "Enable on-glass wake word by default",
           "default_ttl_ms": "Default HUD card lifetime (milliseconds)",
           "fallback_media_player": "Fallback media_player entity ID for announcements"
         }
+      },
+      "confirm": {
+        "title": "Pair {name}",
+        "description": "A new HassGlass device is asking to pair. Enter the 6-digit code shown on its HUD to confirm.",
+        "data": {
+          "code": "Pairing code"
+        }
       }
     },
     "abort": {
-      "already_configured": "HassGlass is already set up. Only one hub per Home Assistant installation is supported."
+      "already_configured": "HassGlass is already set up. Only one hub per Home Assistant installation is supported.",
+      "device_paired": "{name} is paired and will appear under the HassGlass hub.",
+      "hub_not_configured": "Finish the HassGlass hub setup first, then put the glasses back on to pair them.",
+      "invalid_discovery_info": "Discovered device did not advertise enough information to pair."
+    },
+    "error": {
+      "invalid_code": "That code didn't match. Check the HUD and try again."
     }
   },
   "options": {

@@ -1,4 +1,4 @@
-"""HTTP endpoint the Glass Agent calls to complete a pairing handshake.
+"""HTTP endpoint the Glass Agent calls to start a pairing handshake.
 
 POST /api/hassglass/pair
 {
@@ -10,21 +10,25 @@ POST /api/hassglass/pair
   "name":           "Living-Room Glasses"
 }
 
+The request parks until the user confirms the code from the HA side (via the
+zeroconf-driven config flow) or the broker's TTL elapses.
+
 Response on success (HTTP 200):
 {
   "token":     "...",
   "device_id": "rokid-001"
 }
 
-The pairing UI in HA's config flow is what generates the code (via
-`PairingBroker.begin()`) and shows it to the user; the user reads it off the
-HUD and enters it in HA. The Glass Agent independently POSTs here to claim the
-code. The first side to commit wins; the other waits on
-`PendingPairing.completed`.
+Failure modes:
+- HTTP 400: malformed JSON or schema mismatch.
+- HTTP 401: code rejected (lockout, mismatched on confirmation).
+- HTTP 408: TTL elapsed without confirmation.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -43,6 +47,9 @@ _LOGGER = logging.getLogger(__name__)
 
 PAIRING_URL = "/api/hassglass/pair"
 
+# Match the broker's default TTL — the agent will give up on its own side too.
+_CLAIM_TIMEOUT_S = 120.0
+
 _SCHEMA = vol.Schema(
     {
         vol.Required("code"): vol.All(str, vol.Length(min=6, max=6)),
@@ -56,7 +63,7 @@ _SCHEMA = vol.Schema(
 
 
 class HassGlassPairingView(HomeAssistantView):
-    """Accepts pairing-code claims from the Glass Agent."""
+    """Accepts pairing claims from the Glass Agent and parks them until confirmed."""
 
     url = PAIRING_URL
     name = "api:hassglass:pair"
@@ -76,22 +83,41 @@ class HassGlassPairingView(HomeAssistantView):
             return self.json_message(f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
 
         broker = self.hub.entry.runtime_data.pairing_broker
+
+        def record_factory(token: str) -> DeviceRecord:
+            return DeviceRecord(
+                device_id=validated["device_id"],
+                serial=validated["serial"],
+                firmware=validated["firmware"],
+                agent_version=validated["agent_version"],
+                token=token,
+                name=validated["name"],
+            )
+
         try:
-            record = broker.complete(
+            pending = broker.claim(
                 validated["code"],
-                record_factory=lambda token: DeviceRecord(
-                    device_id=validated["device_id"],
-                    serial=validated["serial"],
-                    firmware=validated["firmware"],
-                    agent_version=validated["agent_version"],
-                    token=token,
-                    name=validated["name"],
-                ),
+                device_id=validated["device_id"],
+                name=validated["name"],
+                record_factory=record_factory,
             )
         except PairingError as exc:
             _LOGGER.info("pairing claim rejected: %s", exc)
             return self.json_message(str(exc), HTTPStatus.UNAUTHORIZED)
 
-        await self.hub.add_device(record)
+        future = pending.ensure_future()
+        try:
+            record = await asyncio.wait_for(future, timeout=_CLAIM_TIMEOUT_S)
+        except TimeoutError:
+            broker.cancel(pending)
+            return self.json_message("pairing timed out", HTTPStatus.REQUEST_TIMEOUT)
+        except asyncio.CancelledError:
+            broker.cancel(pending)
+            raise
+        except PairingError as exc:
+            return self.json_message(str(exc), HTTPStatus.UNAUTHORIZED)
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.hub.add_device(record)
         _LOGGER.info("paired device %s (%s)", record.device_id, record.name)
         return self.json({"token": record.token, "device_id": record.device_id})
