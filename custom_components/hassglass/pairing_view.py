@@ -109,6 +109,7 @@ class HassGlassPairingView(HomeAssistantView):
                 name=validated["name"],
             )
 
+        pending = None
         try:
             pending = broker.claim(
                 validated["code"],
@@ -116,21 +117,18 @@ class HassGlassPairingView(HomeAssistantView):
                 name=validated["name"],
                 record_factory=record_factory,
             )
+            record = await asyncio.wait_for(pending.ensure_future(), timeout=_CLAIM_TIMEOUT_S)
         except PairingError as exc:
-            _LOGGER.info("pairing claim rejected: %s", exc)
+            _LOGGER.info("pairing rejected: %s", exc)
             return self.json_message(str(exc), HTTPStatus.UNAUTHORIZED)
-
-        future = pending.ensure_future()
-        try:
-            record = await asyncio.wait_for(future, timeout=_CLAIM_TIMEOUT_S)
         except TimeoutError:
-            broker.cancel(pending)
+            if pending is not None:
+                broker.cancel(pending)
             return self.json_message("pairing timed out", HTTPStatus.REQUEST_TIMEOUT)
         except asyncio.CancelledError:
-            broker.cancel(pending)
+            if pending is not None:
+                broker.cancel(pending)
             raise
-        except PairingError as exc:
-            return self.json_message(str(exc), HTTPStatus.UNAUTHORIZED)
 
         with contextlib.suppress(asyncio.CancelledError):
             await hub.add_device(record)
