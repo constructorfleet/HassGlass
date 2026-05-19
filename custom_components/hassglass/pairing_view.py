@@ -31,17 +31,14 @@ import asyncio
 import contextlib
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING
 
 import voluptuous as vol
 from aiohttp import web
 from homeassistant.helpers.http import HomeAssistantView
 
+from .const import DOMAIN
 from .device import DeviceRecord
 from .pairing import PairingError
-
-if TYPE_CHECKING:
-    from .hub import HassGlassHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,14 +60,24 @@ _SCHEMA = vol.Schema(
 
 
 class HassGlassPairingView(HomeAssistantView):
-    """Accepts pairing claims from the Glass Agent and parks them until confirmed."""
+    """Accepts pairing claims from the Glass Agent and parks them until confirmed.
+
+    Stateless: looks up the active hub on every request via self.hass so it
+    stays correct across entry reloads and hub delete-then-recreate cycles
+    (HTTP views cannot be deregistered from aiohttp once added).
+    """
 
     url = PAIRING_URL
     name = "api:hassglass:pair"
     requires_auth = False  # unauthenticated by design — the code IS the auth
 
-    def __init__(self, hub: HassGlassHub) -> None:
-        self.hub = hub
+    def _get_runtime(self):  # type: ignore[return]
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        entry = next(
+            (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
+            None,
+        )
+        return entry.runtime_data if entry is not None else None
 
     async def post(self, request: web.Request) -> web.Response:
         try:
@@ -82,7 +89,11 @@ class HassGlassPairingView(HomeAssistantView):
         except vol.Invalid as exc:
             return self.json_message(f"invalid payload: {exc}", HTTPStatus.BAD_REQUEST)
 
-        broker = self.hub.entry.runtime_data.pairing_broker
+        runtime = self._get_runtime()
+        if runtime is None:
+            return self.json_message("hub not set up", HTTPStatus.SERVICE_UNAVAILABLE)
+        broker = runtime.pairing_broker
+        hub = runtime.hub
 
         def record_factory(token: str) -> DeviceRecord:
             return DeviceRecord(
@@ -118,6 +129,6 @@ class HassGlassPairingView(HomeAssistantView):
             return self.json_message(str(exc), HTTPStatus.UNAUTHORIZED)
 
         with contextlib.suppress(asyncio.CancelledError):
-            await self.hub.add_device(record)
+            await hub.add_device(record)
         _LOGGER.info("paired device %s (%s)", record.device_id, record.name)
         return self.json({"token": record.token, "device_id": record.device_id})

@@ -9,7 +9,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .hub import HassGlassHub
+from .const import DOMAIN
+from .hub import HassGlassHub, async_clear_device_store
 from .hud import HudDispatcher
 from .pairing import PairingBroker
 from .pairing_view import HassGlassPairingView
@@ -64,8 +65,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) ->
         options_snapshot=dict(entry.options),
     )
 
-    hass.http.register_view(HassGlassWsView(hass, hub, bridge))
-    hass.http.register_view(HassGlassPairingView(hub))
+    # Views are registered once — aiohttp doesn't support replacing a live route.
+    # They look up runtime state dynamically via self.hass, so they stay correct
+    # across entry reloads and hub delete-then-recreate.
+    if not hass.data.get(f"{DOMAIN}_views_registered"):
+        hass.http.register_view(HassGlassWsView())
+        hass.http.register_view(HassGlassPairingView())
+        hass.data[f"{DOMAIN}_views_registered"] = True
     async_register_services(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -73,6 +79,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) ->
 
     _LOGGER.info("HassGlass set up with %d paired device(s)", len(hub.devices))
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) -> None:
+    """Wipe persisted device records when the hub entry is deleted.
+
+    Without this, the store survives deletion so all previously-paired devices
+    re-appear the next time the hub is added — and their stored tokens stop
+    being valid, causing "invalid code" on re-pairing.
+    """
+    await async_clear_device_store(hass)
+    hass.data.pop(f"{DOMAIN}_views_registered", None)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: HassGlassConfigEntry) -> bool:
