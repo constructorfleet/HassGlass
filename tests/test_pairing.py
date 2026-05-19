@@ -123,6 +123,7 @@ def test_replacement_claim_cancels_prior_future() -> None:
         name="Test glasses",
         record_factory=_make_record,
     )
+
     # Whoever last claimed the code wins; the prior parked POST is cancelled.
     async def _drive() -> None:
         future = pending_a.ensure_future()
