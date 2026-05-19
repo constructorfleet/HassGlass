@@ -1,5 +1,6 @@
 package dev.hassglass.agent.pairing
 
+import android.util.Log
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -15,21 +16,30 @@ class OkHttpPairingTransport(
     private val mediaType = "application/json; charset=utf-8".toMediaType()
 
     override fun post(request: PairingRequest): PairingClaimResponse {
+        Log.i(TAG, "POST ${request.url}")
         val httpRequest = Request.Builder()
             .url(request.url)
             .post(json.encodeToString(request.payload).toRequestBody(mediaType))
             .build()
 
         client.newCall(httpRequest).execute().use { response ->
+            val rawBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw PairingException("pairing failed: HTTP ${response.code}")
+                Log.w(TAG, "POST ${request.url} → HTTP ${response.code}: ${rawBody.take(500)}")
+                throw PairingException("pairing failed: HTTP ${response.code} ${rawBody.take(200)}")
             }
-            val body = response.body?.string() ?: throw PairingException("pairing response was empty")
-            return json.decodeFromString<PairingClaimResponse>(body)
+            if (rawBody.isEmpty()) {
+                Log.w(TAG, "POST ${request.url} → HTTP ${response.code} with empty body")
+                throw PairingException("pairing response was empty")
+            }
+            Log.i(TAG, "POST ${request.url} → HTTP ${response.code} (${rawBody.length} bytes)")
+            return json.decodeFromString<PairingClaimResponse>(rawBody)
         }
     }
 
     companion object {
+        private const val TAG = "HassGlass"
+
         /**
          * The pairing endpoint long-polls — HA holds the request open until the user enters the
          * code (or the broker's 120 s TTL elapses). Default OkHttp read timeout is 10 s; bump the
