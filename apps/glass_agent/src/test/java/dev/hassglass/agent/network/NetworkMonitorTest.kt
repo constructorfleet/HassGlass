@@ -17,7 +17,7 @@ class NetworkMonitorTest {
         val events = mutableListOf<NetworkEvent>()
         val fake = FakeRegistrar()
         val monitor = NetworkMonitor(
-            context = /* not used by FakeRegistrar */ kotlin.run { object {} } as android.content.Context,
+            context = null,
             observer = NetworkObserver { events.add(it) },
             registrar = fake,
         )

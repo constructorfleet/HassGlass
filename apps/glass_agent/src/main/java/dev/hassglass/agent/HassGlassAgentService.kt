@@ -16,6 +16,7 @@ import dev.hassglass.agent.ws.TelemetrySnapshot
 import dev.hassglass.agent.ws.WsClient
 import dev.hassglass.agent.network.NetworkMonitor
 import dev.hassglass.agent.network.NetworkEvent
+import dev.hassglass.agent.network.NetworkObserver
 
 /**
  * Foreground service for the on-glasses agent runtime.
@@ -51,11 +52,11 @@ class HassGlassAgentService : Service() {
             onDisconnected = runtime::detachConnection,
         )
 
-        networkMonitor = NetworkMonitor(this) { event ->
+        networkMonitor = NetworkMonitor(this, NetworkObserver { event ->
             when (event) {
                 NetworkEvent.Lost, NetworkEvent.Available -> controller?.stop()
             }
-        }
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

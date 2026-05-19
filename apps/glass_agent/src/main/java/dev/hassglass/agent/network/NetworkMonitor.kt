@@ -18,7 +18,7 @@ interface NetworkRegistrar {
     fun register(cb: Callback)
     fun unregister(cb: Callback)
 
-    fun interface Callback {
+    interface Callback {
         fun onAvailable()
         fun onLost()
     }
@@ -52,12 +52,12 @@ private class AndroidNetworkRegistrar(private val cm: ConnectivityManager) : Net
 }
 
 class NetworkMonitor(
-    context: Context,
+    context: Context?,
     private val observer: NetworkObserver,
     private val registrar: NetworkRegistrar? = null,
 ) {
     private val registrarImpl: NetworkRegistrar = registrar
-        ?: AndroidNetworkRegistrar(context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+        ?: AndroidNetworkRegistrar(context!!.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
 
     private var cb: NetworkRegistrar.Callback? = null
 
