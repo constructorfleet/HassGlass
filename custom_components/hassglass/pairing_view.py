@@ -31,7 +31,6 @@ import asyncio
 import contextlib
 import logging
 from http import HTTPStatus
-from typing import Tuple
 
 import voluptuous as vol
 from aiohttp import web
@@ -87,7 +86,7 @@ class HassGlassPairingView(HomeAssistantView):
         return entry.runtime_data if entry is not None else None
 
     async def post(self, request: web.Request) -> web.Response:
-        error: Tuple[str, HTTPStatus] | None = None
+        error: tuple[str, HTTPStatus] | None = None
         payload = None
         try:
             payload = await request.json()
