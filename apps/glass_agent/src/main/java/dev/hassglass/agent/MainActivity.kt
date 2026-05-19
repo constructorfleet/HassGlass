@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.os.Build
 import android.os.Bundle
@@ -80,6 +82,11 @@ class MainActivity : Activity() {
 
         setContentView(buildLayout())
         renderState()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!pairingInFlight) renderState()
     }
 
     override fun onDestroy() {
@@ -164,15 +171,23 @@ class MainActivity : Activity() {
 
     private fun renderState() {
         val paired = settingsStore.loadPairedSettings()
+        val online = hasLocalNetwork()
         if (paired == null) {
             if (pairingInFlight) {
                 pairButton.visibility = View.GONE
                 cancelPairButton.visibility = View.VISIBLE
                 codeView.visibility = View.VISIBLE
+            } else if (!online) {
+                setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
+                codeView.visibility = View.GONE
+                pairButton.visibility = View.VISIBLE
+                pairButton.isEnabled = false
+                cancelPairButton.visibility = View.GONE
             } else {
                 setStatus("Not paired. Tap Pair, then enter the code in Home Assistant.")
                 codeView.visibility = View.GONE
                 pairButton.visibility = View.VISIBLE
+                pairButton.isEnabled = true
                 cancelPairButton.visibility = View.GONE
             }
             startButton.visibility = View.GONE
@@ -189,8 +204,21 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun hasLocalNetwork(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
     private fun startPairing() {
         if (pairingInFlight) return
+        if (!hasLocalNetwork()) {
+            setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
+            renderState()
+            return
+        }
         val identity = currentIdentity()
         val code = PairingCodeGenerator.generate()
         pendingCode = code
