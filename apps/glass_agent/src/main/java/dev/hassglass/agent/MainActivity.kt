@@ -11,11 +11,14 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.net.nsd.NsdManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -42,15 +45,18 @@ import java.util.concurrent.Executors
  * On-glasses launcher.
  *
  * Unpaired path:
- *  - Generate a 6-digit pairing code.
- *  - Discover HA via mDNS (`_home-assistant._tcp.local.`) — no URL input needed.
- *  - Advertise `_hassglass._tcp.local.` so HA's zeroconf integration surfaces a "Discovered"
+ * - Generate a 6-digit pairing code.
+ * - Discover HA via mDNS (`_home-assistant._tcp.local.`) — no URL input needed.
+ * - Advertise `_hassglass._tcp.local.` so HA's zeroconf integration surfaces a "Discovered"
+ * ```
  *    card with our identity + code in TXT records.
- *  - POST the code to HA's pairing endpoint and park; HA resolves the POST once the user
+ * ```
+ * - POST the code to HA's pairing endpoint and park; HA resolves the POST once the user
+ * ```
  *    confirms the code in the HA UI.
- *
+ * ```
  * Paired path:
- *  - Start/Stop the foreground agent service. Clear-pairing escape hatch.
+ * - Start/Stop the foreground agent service. Clear-pairing escape hatch.
  */
 class MainActivity : Activity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -81,9 +87,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         preferences = getSharedPreferences(HassGlassAgentService.PREFERENCES_NAME, MODE_PRIVATE)
         settingsStore = AgentSettingsStore(SharedPreferencesKeyValueStore(preferences))
-        deviceId = preferences.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
-            preferences.edit().putString(KEY_DEVICE_ID, it).apply()
-        }
+        deviceId =
+                preferences.getString(KEY_DEVICE_ID, null)
+                        ?: UUID.randomUUID().toString().also {
+                            preferences.edit().putString(KEY_DEVICE_ID, it).apply()
+                        }
         val nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
         advertiser = HassGlassAdvertiser(nsd)
         discovery = HomeAssistantDiscovery(nsd)
@@ -94,9 +102,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        hudUnsubscribe = SharedHudDisplayStore.addListener { card ->
-            mainHandler.post { renderHud(card) }
-        }
+        hudUnsubscribe =
+                SharedHudDisplayStore.addListener { card -> mainHandler.post { renderHud(card) } }
         if (!pairingInFlight) {
             renderState()
             maybeStartAgent()
@@ -116,12 +123,14 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
+            requestCode: Int,
+            permissions: Array<out String>,
+            grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_MIC && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == REQUEST_MIC &&
+                        grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        ) {
             maybeStartAgent()
         } else if (requestCode == REQUEST_MIC) {
             setStatus("Microphone permission is required for the agent.")
@@ -129,60 +138,76 @@ class MainActivity : Activity() {
     }
 
     private fun buildLayout(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
-            setBackgroundColor(Color.BLACK)
-            // Any touch counts as a user input event in the system's view, which grants a brief
-            // window during which the app can start a foreground-microphone service from API 31+
-            // even though the device's launcher never gives our window focus. Wire the root to
-            // trigger a service start so the wearer can boot the agent with a single tap.
-            setOnTouchListener { _, _ -> maybeStartAgent(); false }
-        }
+        val root =
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(48, 48, 48, 48)
+                    setBackgroundColor(Color.BLACK)
+                    // Any touch counts as a user input event in the system's view, which grants a
+                    // brief
+                    // window during which the app can start a foreground-microphone service from
+                    // API 31+
+                    // even though the device's launcher never gives our window focus. Wire the root
+                    // to
+                    // trigger a service start so the wearer can boot the agent with a single tap.
+                    setOnTouchListener { _, _ ->
+                        maybeStartAgent()
+                        false
+                    }
+                }
 
-        statusView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            text = "HassGlass"
-        }
+        statusView =
+                TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    text = "HassGlass"
+                }
         root.addView(statusView, lp(0, bottom = 24))
 
-        hudContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-            setPadding(28, 24, 28, 24)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#E6090F18"))
-                setStroke(3, Color.parseColor("#4FC3F7"))
-                cornerRadius = 18f
-            }
-        }
-        hudTitleView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-        }
-        hudBodyView = TextView(this).apply {
-            setTextColor(Color.parseColor("#D6E0EB"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-        }
+        hudContainer =
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    visibility = View.GONE
+                    setPadding(28, 24, 28, 24)
+                    background =
+                            GradientDrawable().apply {
+                                setColor(Color.parseColor("#E6090F18"))
+                                setStroke(3, Color.parseColor("#4FC3F7"))
+                                cornerRadius = 18f
+                            }
+                }
+        hudTitleView =
+                TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+                }
+        hudBodyView =
+                TextView(this).apply {
+                    setTextColor(Color.parseColor("#D6E0EB"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                }
         hudContainer.addView(hudTitleView, lp(MATCH_PARENT, bottom = 8))
         hudContainer.addView(hudBodyView, lp(MATCH_PARENT))
         root.addView(hudContainer, lp(MATCH_PARENT, bottom = 24))
 
-        codeView = TextView(this).apply {
-            setTextColor(Color.parseColor("#00E5FF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 48f)
-            gravity = Gravity.CENTER
-            visibility = View.GONE
-        }
+        codeView =
+                TextView(this).apply {
+                    setTextColor(Color.parseColor("#00E5FF"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 48f)
+                    gravity = Gravity.CENTER
+                    visibility = View.GONE
+                }
         root.addView(codeView, lp(MATCH_PARENT, bottom = 16))
 
         pairButton = focusableButton("Pair with Home Assistant") { startPairing() }
         root.addView(pairButton, lp(MATCH_PARENT, bottom = 16))
 
-        cancelPairButton = focusableButton("Cancel pairing") { stopPairing(); renderState() }.apply {
-            visibility = View.GONE
-        }
+        cancelPairButton =
+                focusableButton("Cancel pairing") {
+                    stopPairing()
+                    renderState()
+                }
+                        .apply { visibility = View.GONE }
         root.addView(cancelPairButton, lp(MATCH_PARENT, bottom = 16))
 
         startAgentButton = focusableButton("Start agent") { maybeStartAgent() }
@@ -195,27 +220,29 @@ class MainActivity : Activity() {
     }
 
     private fun focusableButton(label: String, onClick: () -> Unit): Button =
-        Button(this).apply {
-            text = label
-            setTextColor(Color.WHITE)
-            background = focusableBackground()
-            isFocusable = true
-            isFocusableInTouchMode = true
-            setPadding(32, 24, 32, 24)
-            setOnClickListener { onClick() }
-        }
+            Button(this).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                background = focusableBackground()
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(32, 24, 32, 24)
+                setOnClickListener { onClick() }
+            }
 
     private fun focusableBackground(): StateListDrawable {
-        val focused = GradientDrawable().apply {
-            setColor(Color.parseColor("#003B42"))
-            setStroke(8, Color.parseColor("#00E5FF"))
-            cornerRadius = 14f
-        }
-        val normal = GradientDrawable().apply {
-            setColor(Color.parseColor("#0E2628"))
-            setStroke(2, Color.parseColor("#1F4044"))
-            cornerRadius = 14f
-        }
+        val focused =
+                GradientDrawable().apply {
+                    setColor(Color.parseColor("#003B42"))
+                    setStroke(8, Color.parseColor("#00E5FF"))
+                    cornerRadius = 14f
+                }
+        val normal =
+                GradientDrawable().apply {
+                    setColor(Color.parseColor("#0E2628"))
+                    setStroke(2, Color.parseColor("#1F4044"))
+                    cornerRadius = 14f
+                }
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), focused)
             addState(intArrayOf(android.R.attr.state_pressed), focused)
@@ -225,9 +252,9 @@ class MainActivity : Activity() {
     }
 
     private fun lp(width: Int = WRAP_CONTENT, bottom: Int = 0): LinearLayout.LayoutParams =
-        LinearLayout.LayoutParams(if (width == 0) MATCH_PARENT else width, WRAP_CONTENT).apply {
-            bottomMargin = bottom
-        }
+            LinearLayout.LayoutParams(if (width == 0) MATCH_PARENT else width, WRAP_CONTENT).apply {
+                bottomMargin = bottom
+            }
 
     private fun renderState() {
         val paired = settingsStore.loadPairedSettings()
@@ -244,7 +271,9 @@ class MainActivity : Activity() {
                     initialFocus = cancelPairButton
                 }
                 !online -> {
-                    setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
+                    setStatus(
+                            "No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair."
+                    )
                     codeView.visibility = View.GONE
                     pairButton.visibility = View.VISIBLE
                     pairButton.isEnabled = false
@@ -262,8 +291,8 @@ class MainActivity : Activity() {
             }
         } else {
             setStatus(
-                if (online) "Paired with ${paired.haBaseUrl}. Agent will run while Wi-Fi is up."
-                else "Paired. Waiting for Wi-Fi…",
+                    if (online) "Paired with ${paired.haBaseUrl}. Agent will run while Wi-Fi is up."
+                    else "Paired. Waiting for Wi-Fi…",
             )
             codeView.visibility = View.GONE
             pairButton.visibility = View.GONE
@@ -282,20 +311,19 @@ class MainActivity : Activity() {
         }
         val fields = card.card.fields
         hudTitleView.text =
-            fields["title"]
-                ?: fields["text"]
-                ?: fields["label"]
-                ?: card.card.kind.replace('_', ' ')
+                fields["title"]
+                        ?: fields["text"] ?: fields["label"] ?: card.card.kind.replace('_', ' ')
         hudBodyView.text =
-            listOfNotNull(
-                    fields["subtitle"],
-                    fields["body"],
-                    fields["artist"],
-                    fields["items_0"],
-                    fields["items_1"],
-                    fields["items_2"],
-                    fields["items_3"],
-            ).joinToString("\n")
+                listOfNotNull(
+                                fields["subtitle"],
+                                fields["body"],
+                                fields["artist"],
+                                fields["items_0"],
+                                fields["items_1"],
+                                fields["items_2"],
+                                fields["items_3"],
+                        )
+                        .joinToString("\n")
         hudBodyView.visibility = if (hudBodyView.text.isNullOrBlank()) View.GONE else View.VISIBLE
         hudContainer.visibility = View.VISIBLE
     }
@@ -305,13 +333,15 @@ class MainActivity : Activity() {
         val network = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(network) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
     private fun startPairing() {
         if (pairingInFlight) return
         if (!hasLocalNetwork()) {
-            setStatus("No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair.")
+            setStatus(
+                    "No Wi-Fi connection. Join the same network as Home Assistant, then tap Pair."
+            )
             renderState()
             return
         }
@@ -324,39 +354,45 @@ class MainActivity : Activity() {
         renderState()
         Log.i(TAG, "pair: started code=$code device_id=${identity.deviceId}")
         advertiser.advertise(identity, code)
-        discoveryHandle = discovery.discover(object : HomeAssistantDiscovery.Listener {
-            override fun onDiscovered(result: HomeAssistantDiscovery.Discovered) {
-                val baseUrl = result.baseUrl
-                if (baseUrl == null) {
-                    Log.w(
-                        TAG,
-                        "pair: HA at ${result.host}:${result.port} did not advertise an HTTPS " +
-                            "internal_url/base_url; refusing cleartext fallback",
-                    )
-                    mainHandler.post {
-                        if (!pairingInFlight || pendingCode != code) return@post
-                        pairingInFlight = false
-                        stopPairing()
-                        setStatus(
-                            "HA didn't advertise an HTTPS internal_url. Set internal_url in HA " +
-                                "configuration.yaml and retry.",
-                        )
-                        renderState()
-                    }
-                    return
-                }
-                Log.i(TAG, "pair: discovered HA at $baseUrl (from ${result.source})")
-                mainHandler.post {
-                    setStatus("Found HA. Enter $code in Home Assistant.")
-                }
-                submitClaim(baseUrl, code, identity)
-            }
+        discoveryHandle =
+                discovery.discover(
+                        object : HomeAssistantDiscovery.Listener {
+                            override fun onDiscovered(result: HomeAssistantDiscovery.Discovered) {
+                                val baseUrl = result.baseUrl
+                                if (baseUrl == null) {
+                                    Log.w(
+                                            TAG,
+                                            "pair: HA at ${result.host}:${result.port} did not advertise an HTTPS " +
+                                                    "internal_url/base_url; refusing cleartext fallback",
+                                    )
+                                    mainHandler.post {
+                                        if (!pairingInFlight || pendingCode != code) return@post
+                                        pairingInFlight = false
+                                        stopPairing()
+                                        setStatus(
+                                                "HA didn't advertise an HTTPS internal_url. Set internal_url in HA " +
+                                                        "configuration.yaml and retry.",
+                                        )
+                                        renderState()
+                                    }
+                                    return
+                                }
+                                Log.i(
+                                        TAG,
+                                        "pair: discovered HA at $baseUrl (from ${result.source})"
+                                )
+                                mainHandler.post {
+                                    setStatus("Found HA. Enter $code in Home Assistant.")
+                                }
+                                submitClaim(baseUrl, code, identity)
+                            }
 
-            override fun onError(message: String) {
-                Log.w(TAG, "pair: discovery error: $message")
-                mainHandler.post { setStatus("Discovery error: $message") }
-            }
-        })
+                            override fun onError(message: String) {
+                                Log.w(TAG, "pair: discovery error: $message")
+                                mainHandler.post { setStatus("Discovery error: $message") }
+                            }
+                        }
+                )
     }
 
     private fun submitClaim(baseUrl: String, code: String, identity: AgentIdentity) {
@@ -374,16 +410,20 @@ class MainActivity : Activity() {
                 }
                 pairingInFlight = false
                 stopPairing()
-                result.onSuccess {
-                    Log.i(TAG, "pair: success after ${elapsed}ms device_id=${it.deviceId}")
-                    setStatus("Paired with ${it.haBaseUrl}.")
-                    renderState()
-                    maybeStartAgent()
-                }.onFailure { error ->
-                    Log.w(TAG, "pair: failed after ${elapsed}ms", error)
-                    setStatus("Pairing failed: ${error.message ?: error.javaClass.simpleName}")
-                    renderState()
-                }
+                result
+                        .onSuccess {
+                            Log.i(TAG, "pair: success after ${elapsed}ms device_id=${it.deviceId}")
+                            setStatus("Paired with ${it.haBaseUrl}.")
+                            renderState()
+                            maybeStartAgent()
+                        }
+                        .onFailure { error ->
+                            Log.w(TAG, "pair: failed after ${elapsed}ms", error)
+                            setStatus(
+                                    "Pairing failed: ${error.message ?: error.javaClass.simpleName}"
+                            )
+                            renderState()
+                        }
             }
         }
     }
@@ -397,24 +437,28 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun currentIdentity(): AgentIdentity = AgentIdentity(
-        deviceId = deviceId,
-        serial = Build.SERIAL.takeIf { it.isNotBlank() && it != Build.UNKNOWN } ?: deviceId,
-        firmware = Build.DISPLAY ?: Build.VERSION.RELEASE,
-        agentVersion = AGENT_VERSION,
-        name = Build.MODEL ?: "HassGlass",
-    )
+    private fun currentIdentity(): AgentIdentity =
+            AgentIdentity(
+                    deviceId = deviceId,
+                    serial = Build.SERIAL.takeIf { it.isNotBlank() && it != Build.UNKNOWN }
+                                    ?: deviceId,
+                    firmware = Build.DISPLAY ?: Build.VERSION.RELEASE,
+                    agentVersion = AGENT_VERSION,
+                    name = Build.MODEL ?: "HassGlass",
+            )
 
     /**
-     * Start the foreground agent service when we're paired and online. Prompts for the
-     * microphone permission once if it hasn't been granted — startForeground requires it
-     * to promote the service under FOREGROUND_SERVICE_TYPE_MICROPHONE.
+     * Start the foreground agent service when we're paired and online. Prompts for the microphone
+     * permission once if it hasn't been granted — startForeground requires it to promote the
+     * service under FOREGROUND_SERVICE_TYPE_MICROPHONE.
      */
     private fun maybeStartAgent() {
         if (pairingInFlight) return
         if (settingsStore.loadPairedSettings() == null) return
         if (!hasLocalNetwork()) return
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                        PackageManager.PERMISSION_GRANTED
+        ) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
             return
         }
@@ -430,6 +474,46 @@ class MainActivity : Activity() {
                 Log.w(TAG, "agent service start failed: $result")
                 setStatus("Failed to start agent service.")
             }
+        }
+        requestBatteryOptimizationExemptionIfNeeded()
+        requestOverlayPermissionIfNeeded()
+    }
+
+    /**
+     * Ask the OS to stop killing HassGlass for "app idle". On Rokid's Android, startForeground()
+     * doesn't set isForeground=true in the service record, so stopInBackgroundLocked() would stop
+     * the service after ~1 minute. Being on the power-save whitelist bypasses that check entirely.
+     */
+    private fun requestBatteryOptimizationExemptionIfNeeded() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        Log.i(TAG, "requesting battery optimization exemption")
+        try {
+            startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            .setData(Uri.parse("package:$packageName"))
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "could not open battery optimization settings", e)
+        }
+    }
+
+    /**
+     * Ask the user to grant the SYSTEM_ALERT_WINDOW permission so HUD cards can be displayed as an
+     * overlay on top of any app (including the Rokid home screen).
+     */
+    private fun requestOverlayPermissionIfNeeded() {
+        if (Settings.canDrawOverlays(this)) return
+        Log.i(TAG, "requesting overlay (SYSTEM_ALERT_WINDOW) permission")
+        try {
+            startActivity(
+                    Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName"),
+                    )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "could not open overlay permission settings", e)
         }
     }
 
