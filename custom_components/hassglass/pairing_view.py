@@ -54,9 +54,7 @@ _SCHEMA = vol.Schema(
         vol.Required("serial"): vol.All(str, vol.Length(min=1, max=128)),
         vol.Required("firmware"): vol.All(str, vol.Length(min=1, max=64)),
         vol.Required("agent_version"): vol.All(str, vol.Length(min=1, max=64)),
-        vol.Optional("name", default="Rokid Glasses"): vol.All(
-            str, vol.Length(min=1, max=128)
-        ),
+        vol.Optional("name", default="Rokid Glasses"): vol.All(str, vol.Length(min=1, max=128)),
     },
 )
 
@@ -76,11 +74,7 @@ class HassGlassPairingView(HomeAssistantView):
     def _get_runtime(self):  # type: ignore[return]
         entries = self.hass.config_entries.async_entries(DOMAIN)
         entry = next(
-            (
-                e
-                for e in entries
-                if e.unique_id == DOMAIN and hasattr(e, "runtime_data")
-            ),
+            (e for e in entries if e.unique_id == DOMAIN and hasattr(e, "runtime_data")),
             None,
         )
         return entry.runtime_data if entry is not None else None

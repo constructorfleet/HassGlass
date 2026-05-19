@@ -37,6 +37,7 @@ class MasterAssistWakeBridge(private val context: Context) : RokidWakeBridge {
                 }
 
                 override fun onMessageReceive(message: AssistMessage): Boolean {
+                    Log.v(TAG, "onMessageReceive: infoType=${message.infoType} msg=${message.message}")
                     if (message.infoType != CMD_CONTROL_SCENE_OR_APP) return false
                     return tryHandleSceneOpen(message.message)
                 }
@@ -54,13 +55,31 @@ class MasterAssistWakeBridge(private val context: Context) : RokidWakeBridge {
             if (type == "scene" && cmd == "open" && name == SCENE_AI_ASSIST) {
                 Log.d(TAG, "Wake-word detected (\"hi rokid\"), intercepting scene open")
                 listener?.invoke(WakeWordEvent(phrase = "hi rokid"))
-                true // consumed — suppresses the native ai_assist scene
+                // The boolean return signals "consumed" to the server, which may or may
+                // not prevent the native ai_assist scene from opening depending on server
+                // version. Belt-and-suspenders: also send a close broadcast to dismiss it.
+                closeAiAssistScene()
+                true
             } else {
                 false
             }
         } catch (e: JSONException) {
             Log.w(TAG, "Failed to parse AssistMessage.message: $json", e)
             false
+        }
+    }
+
+    private fun closeAiAssistScene() {
+        try {
+            val intent = Intent(ASSIST_SERVER_CMD_ACTION).apply {
+                putExtra("cmd_type", "control_scene")
+                putExtra("scene", SCENE_AI_ASSIST)
+                putExtra("open", "false")
+            }
+            context.sendBroadcast(intent)
+            Log.d(TAG, "Sent close-scene broadcast for $SCENE_AI_ASSIST")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to send close-scene broadcast", e)
         }
     }
 
@@ -119,5 +138,6 @@ class MasterAssistWakeBridge(private val context: Context) : RokidWakeBridge {
         private const val SERVICE_PACKAGE = "com.rokid.os.sprite.assistserver"
         private const val CMD_CONTROL_SCENE_OR_APP = "cmd_control_scene_or_app"
         private const val SCENE_AI_ASSIST = "ai_assist"
+        private const val ASSIST_SERVER_CMD_ACTION = "com.rokid.os.master.assist.server.cmd"
     }
 }
