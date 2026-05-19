@@ -27,6 +27,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.hassglass.agent.discovery.HassGlassAdvertiser
 import dev.hassglass.agent.discovery.HomeAssistantDiscovery
+import dev.hassglass.agent.hud.HudCardEnvelope
+import dev.hassglass.agent.hud.SharedHudDisplayStore
 import dev.hassglass.agent.pairing.AgentIdentity
 import dev.hassglass.agent.pairing.OkHttpPairingTransport
 import dev.hassglass.agent.pairing.PairingClient
@@ -63,11 +65,16 @@ class MainActivity : Activity() {
     private var discoveryHandle: HomeAssistantDiscovery.Handle? = null
     private var pairingInFlight: Boolean = false
     private var pendingCode: String? = null
+    private var hudUnsubscribe: (() -> Unit)? = null
 
     private lateinit var statusView: TextView
+    private lateinit var hudContainer: LinearLayout
+    private lateinit var hudTitleView: TextView
+    private lateinit var hudBodyView: TextView
     private lateinit var codeView: TextView
     private lateinit var pairButton: Button
     private lateinit var cancelPairButton: Button
+    private lateinit var startAgentButton: Button
     private lateinit var clearPairingButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,10 +94,19 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        hudUnsubscribe = SharedHudDisplayStore.addListener { card ->
+            mainHandler.post { renderHud(card) }
+        }
         if (!pairingInFlight) {
             renderState()
             maybeStartAgent()
         }
+    }
+
+    override fun onPause() {
+        hudUnsubscribe?.invoke()
+        hudUnsubscribe = null
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -131,6 +147,28 @@ class MainActivity : Activity() {
         }
         root.addView(statusView, lp(0, bottom = 24))
 
+        hudContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(28, 24, 28, 24)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#E6090F18"))
+                setStroke(3, Color.parseColor("#4FC3F7"))
+                cornerRadius = 18f
+            }
+        }
+        hudTitleView = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+        }
+        hudBodyView = TextView(this).apply {
+            setTextColor(Color.parseColor("#D6E0EB"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        }
+        hudContainer.addView(hudTitleView, lp(MATCH_PARENT, bottom = 8))
+        hudContainer.addView(hudBodyView, lp(MATCH_PARENT))
+        root.addView(hudContainer, lp(MATCH_PARENT, bottom = 24))
+
         codeView = TextView(this).apply {
             setTextColor(Color.parseColor("#00E5FF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 48f)
@@ -146,6 +184,9 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(cancelPairButton, lp(MATCH_PARENT, bottom = 16))
+
+        startAgentButton = focusableButton("Start agent") { maybeStartAgent() }
+        root.addView(startAgentButton, lp(MATCH_PARENT, bottom = 16))
 
         clearPairingButton = focusableButton("Clear pairing") { onClearPairingClicked() }
         root.addView(clearPairingButton, lp(MATCH_PARENT))
@@ -194,6 +235,7 @@ class MainActivity : Activity() {
         val initialFocus: View
         if (paired == null) {
             clearPairingButton.visibility = View.GONE
+            startAgentButton.visibility = View.GONE
             when {
                 pairingInFlight -> {
                     pairButton.visibility = View.GONE
@@ -226,10 +268,36 @@ class MainActivity : Activity() {
             codeView.visibility = View.GONE
             pairButton.visibility = View.GONE
             cancelPairButton.visibility = View.GONE
+            startAgentButton.visibility = View.VISIBLE
             clearPairingButton.visibility = View.VISIBLE
-            initialFocus = clearPairingButton
+            initialFocus = startAgentButton
         }
         initialFocus.post { initialFocus.requestFocus() }
+    }
+
+    private fun renderHud(card: HudCardEnvelope?) {
+        if (card == null) {
+            hudContainer.visibility = View.GONE
+            return
+        }
+        val fields = card.card.fields
+        hudTitleView.text =
+            fields["title"]
+                ?: fields["text"]
+                ?: fields["label"]
+                ?: card.card.kind.replace('_', ' ')
+        hudBodyView.text =
+            listOfNotNull(
+                    fields["subtitle"],
+                    fields["body"],
+                    fields["artist"],
+                    fields["items_0"],
+                    fields["items_1"],
+                    fields["items_2"],
+                    fields["items_3"],
+            ).joinToString("\n")
+        hudBodyView.visibility = if (hudBodyView.text.isNullOrBlank()) View.GONE else View.VISIBLE
+        hudContainer.visibility = View.VISIBLE
     }
 
     private fun hasLocalNetwork(): Boolean {
@@ -351,7 +419,18 @@ class MainActivity : Activity() {
             return
         }
         Log.i(TAG, "starting agent service (paired, online, mic permission granted)")
-        startForegroundService(Intent(this, HassGlassAgentService::class.java))
+        val result = AgentServiceStarter(this).start()
+        when (result) {
+            AgentServiceStartResult.STARTED -> setStatus("Agent service starting.")
+            AgentServiceStartResult.FAILED_FOREGROUND_START -> {
+                Log.w(TAG, "agent service start rejected")
+                setStatus("Tap Start agent to grant Android's foreground-start window.")
+            }
+            else -> {
+                Log.w(TAG, "agent service start failed: $result")
+                setStatus("Failed to start agent service.")
+            }
+        }
     }
 
     private fun onClearPairingClicked() {

@@ -66,9 +66,9 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 
 ---
 
-## M3 — Voice: full Assist pipeline integration ✅ (modulo CXR-L AIDL mic + AudioTrack sink)
+## M3 — Voice: full Assist pipeline integration 🟡
 
-**Outcome:** "Hey Rokid, turn on the kitchen lights" works end-to-end with a listening/thinking/done HUD state.
+**Outcome target:** "Hey Rokid, turn on the kitchen lights" works end-to-end with a listening/thinking/done HUD state. The protocol and most runtime pieces are in place, but production audio sink / privileged mic adapters are still open.
 
 **Integration side:**
 
@@ -93,9 +93,9 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 
 ---
 
-## M4 — Polish, gestures, blueprints ✅
+## M4 — Polish, gestures, blueprints 🟡
 
-**Outcome:** Daily-driver quality. Gestures trigger automations. Useful starter blueprints. Settings are discoverable.
+**Outcome target:** Daily-driver quality. Gestures trigger automations. Useful starter blueprints. Settings are discoverable. The UX and integration surfaces are largely there, but the direct-Wi-Fi runtime still has unresolved service, reconnect, and HUD-hosting gaps.
 
 - [x] `event.py` — touchpad gesture + side-button event entities per device. Whitelist: `swipe_{forward,back,up,down}`, `tap`, `double_tap`, `long_press`, `head_nod`, `head_shake` for gestures; `side_press`, `side_long_press`, `side_double_press`, `side_release` for buttons.
 - [x] **IMU head-nod / head-shake detection** — `HeadPoseInterpreter` runs a windowed zero-crossing detector with a refractory window; `HeadPoseGestureBridge` emits `input.gesture` frames with `kind: head_nod | head_shake` and `axis: pitch | yaw`. Routed through the same gesture event entity on the integration side.
@@ -126,7 +126,7 @@ Legend: ✅ done · 🟡 partial · ⏳ in progress · ⬜ not started · ⏭ de
 |---|---|---|---|---|---|---|
 | Docs + scaffolding | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
 | Integration code (Python) | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
-| Glass Agent code (Kotlin) | — | 🟡 | 🟡 | 🟡 | ✅ | ⬜ |
+| Glass Agent code (Kotlin) | — | 🟡 | 🟡 | 🟡 | 🟡 | ⬜ |
 | iOS Companion (Swift) | — | — | — | — | ⬜ | ⬜ |
 | CI green | ✅ | ✅ | ✅ | ✅ | ✅ | ⬜ |
 
@@ -134,11 +134,13 @@ Snapshot at end of last work session:
 
 - **119 Python tests passing**, **ruff clean**, **mypy --strict clean** on 26 Python source files.
 - **Android `gradle :apps:glass_agent:testDebugUnitTest`** passing across 14 test classes (covering protocol codec, WS client, pairing client/flow, settings store, HUD card stack/controller, agent controller, wake-trigger, mic session, mic frame sender, TTS player, Caps command translator, and head-pose interpreter).
-- Nine HA platforms ship per paired device: `sensor`, `binary_sensor`, `button`, `select`, `switch`, `media_player`, `event`, `notify`. (`event` carries gestures + buttons + head-pose.)
+- Eight HA platforms ship per paired device: `sensor`, `binary_sensor`, `button`, `select`, `switch`, `media_player`, `event`, `notify`. (`event` carries gestures + buttons + head-pose.)
 - Three services exposed: `hassglass.notify`, `hassglass.dismiss`, `hassglass.identify`.
 - Four blueprints in `custom_components/hassglass/blueprints/`: doorbell, timer, motion, alarm.
 
 **What's left before M5:**
+
+M3 and M4 should be read as "substantially implemented, not release-ready." The remaining items below are the runtime gaps still blocking a truthful "done" label on the Glass Agent side.
 
 The runtime contracts are now implemented for the non-privileged Android path:
 
@@ -150,7 +152,12 @@ The only adapter-level follow-up before a fully privileged Rokid build is the CX
 
 1. `CxrlMicSource` — bind to the CXR-L AIDL service, request the AEC mic path, and swap it in where the app currently uses `AndroidMicSource`.
 
-The remaining runtime follow-up is visual HUD hosting: the service currently composes the inbound HUD path through the runtime but still uses `LoggingHudRenderer` until a real `SurfaceHolder` host exists for `AndroidCapsSurface`.
+Current direct-Wi-Fi runtime gaps:
+
+1. Foreground service must be started through an allowed user-initiated path on YodaOS.
+2. The WebSocket supervisor must reconnect after close/failure and after network loss.
+3. The activity-hosted HUD fallback is visible only while the app is open.
+4. CXR-L native display/audio/wake hooks remain a separate hardware-specific adapter milestone.
 
 ---
 

@@ -8,8 +8,8 @@ import dev.hassglass.agent.audio.MicSession
 import dev.hassglass.agent.audio.MicSource
 import dev.hassglass.agent.audio.TtsPlayer
 import dev.hassglass.agent.hud.HudController
+import dev.hassglass.agent.hud.HudDisplayRenderer
 import dev.hassglass.agent.hud.HudRenderer
-import dev.hassglass.agent.hud.LoggingHudRenderer
 import dev.hassglass.agent.protocol.MessageType
 import dev.hassglass.agent.protocol.ProtocolCodec
 import dev.hassglass.agent.ws.WsConnection
@@ -17,13 +17,12 @@ import dev.hassglass.agent.ws.WsConnection
 /**
  * Owns the live, device-side runtime pieces that hang off a WebSocket session.
  *
- * The current service does not yet host a HUD surface, so the default renderer stays on
- * [LoggingHudRenderer]. Once a surface host exists, swap in
- * `CapsHudRenderer(AndroidCapsSurface(...))` without changing the inbound WS routing or mic/TTS
- * plumbing here.
+ * The service publishes HUD cards into [HudDisplayRenderer], which keeps the latest card available
+ * to the foreground activity. A Rokid-native Caps surface can replace that renderer without
+ * changing the inbound WS routing or mic/TTS plumbing here.
  */
 class AgentRuntime(
-        hudRenderer: HudRenderer = LoggingHudRenderer(),
+        hudRenderer: HudRenderer = HudDisplayRenderer(),
         private val micSourceFactory: () -> MicSource = { AndroidMicSource() },
         private val playbackSink: AudioTrackPlaybackSink =
                 AudioTrackPlaybackSink(AndroidAudioTrackWriter()),

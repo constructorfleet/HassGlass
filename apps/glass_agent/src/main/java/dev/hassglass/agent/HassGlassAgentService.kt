@@ -51,9 +51,11 @@ class HassGlassAgentService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         promoteToForeground()
-        worker = Thread {
-            controller?.start()
-        }.also { it.start() }
+        if (worker?.isAlive != true) {
+            worker = Thread {
+                controller?.runUntilStopped()
+            }.also { it.start() }
+        }
         return START_STICKY
     }
 
@@ -69,7 +71,7 @@ class HassGlassAgentService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)

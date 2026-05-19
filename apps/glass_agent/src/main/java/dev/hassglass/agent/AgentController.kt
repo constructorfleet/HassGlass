@@ -16,23 +16,55 @@ class AgentController(
         private val settingsStore: AgentSettingsStore,
         private val connector: AgentConnector,
         private val telemetryProvider: () -> TelemetrySnapshot? = { null },
+        private val reconnectDelayMs: Long = 1_000,
+        private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
         private val onConnected: (WsConnection) -> Unit = {},
         private val onDisconnected: () -> Unit = {},
 ) {
+    @Volatile private var stopped = false
     private var connection: WsConnection? = null
 
     fun start(): AgentStartResult {
         val settings =
                 settingsStore.loadPairedSettings() ?: return AgentStartResult.PAIRING_REQUIRED
+        stopped = false
         connection = connector.connectWithRetry(settings.toConnectionConfig(telemetryProvider()))
         connection?.let(onConnected)
         return AgentStartResult.CONNECTED
     }
 
+    fun runUntilStopped(): AgentStartResult {
+        val settings =
+                settingsStore.loadPairedSettings() ?: return AgentStartResult.PAIRING_REQUIRED
+        stopped = false
+        while (!stopped) {
+            try {
+                connection = connector.connectWithRetry(settings.toConnectionConfig(telemetryProvider()))
+                val active = connection
+                active?.let(onConnected)
+                active?.awaitClose()
+                if (connection === active) {
+                    connection = null
+                    onDisconnected()
+                }
+            } catch (_: Throwable) {
+                connection = null
+            }
+            if (!stopped) {
+                sleeper(reconnectDelayMs)
+            }
+        }
+        return AgentStartResult.CONNECTED
+    }
+
     fun stop() {
-        connection?.close()
+        stopped = true
+        val active = connection
+        active?.close()
         connection = null
-        onDisconnected()
+        if (active != null) {
+            onDisconnected()
+        }
     }
 
     private fun PairedAgentSettings.toConnectionConfig(
